@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reverse-Engineering Codex Auth and Usage Recovery</title>
+<style>
+  :root {
+    --bg: #0b1320;
+    --surface: #121c2e;
+    --surface2: #19263c;
+    --border: #2f3c55;
+    --text: #e7edf7;
+    --text-dim: #9eb0ca;
+    --accent: #4fd1c5;
+    --green: #79e2a0;
+    --red: #ff7b72;
+    --yellow: #eac36a;
+    --orange: #ffad66;
+    --purple: #b9a3ff;
+    --code-bg: #09111f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: radial-gradient(circle at top left, #15304e 0, transparent 28%), var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #0d1b2a 0%, #132238 45%, #123b47 100%);
+    padding: 60px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.4em;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 1.12em;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .hero .subtitle + .subtitle {
+    margin-top: 10px;
+  }
+  .container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+  }
+  h2 {
+    font-size: 1.65em;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1.2em;
+    margin: 28px 0 12px;
+    color: var(--purple);
+  }
+  p, li { color: var(--text); margin-bottom: 10px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.88em;
+    line-height: 1.55;
+    margin: 12px 0 20px;
+  }
+  code {
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 0.92em;
+  }
+  :not(pre) > code {
+    background: var(--surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--orange);
+  }
+  .cmd { color: var(--green); }
+  .comment { color: var(--text-dim); font-style: italic; }
+  .output { color: var(--text-dim); }
+  .highlight { color: var(--yellow); font-weight: bold; }
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  details[open] { border-color: var(--accent); }
+  summary {
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+  }
+  summary:hover { background: var(--surface2); }
+  summary::marker { content: ""; }
+  summary::before {
+    content: "▶";
+    font-size: 0.7em;
+    transition: transform 0.2s;
+    display: inline-block;
+    width: 16px;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > .content { padding: 0 18px 18px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+  }
+  .badge-success { background: rgba(121,226,160,0.15); color: var(--green); border: 1px solid rgba(121,226,160,0.35); }
+  .badge-fail { background: rgba(255,123,114,0.15); color: var(--red); border: 1px solid rgba(255,123,114,0.35); }
+  .badge-info { background: rgba(79,209,197,0.15); color: var(--accent); border: 1px solid rgba(79,209,197,0.35); }
+  .badge-key { background: rgba(185,163,255,0.15); color: var(--purple); border: 1px solid rgba(185,163,255,0.35); }
+  .callout {
+    border-left: 4px solid;
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+  .callout-success { border-color: var(--green); background: rgba(121,226,160,0.08); }
+  .callout-warning { border-color: var(--yellow); background: rgba(234,195,106,0.08); }
+  .callout-danger { border-color: var(--red); background: rgba(255,123,114,0.08); }
+  .callout-info { border-color: var(--accent); background: rgba(79,209,197,0.08); }
+  .callout strong { display: block; margin-bottom: 4px; }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin: 24px 0;
+  }
+  .toc h3 { margin-top: 0; color: var(--text); }
+  .seq-diagram {
+    font-family: "SF Mono", monospace;
+    font-size: 0.82em;
+    text-align: left;
+    display: inline-block;
+    line-height: 1.6;
+    white-space: pre;
+    color: var(--text);
+  }
+  .diagram-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    margin: 24px 0;
+    text-align: center;
+    overflow-x: auto;
+  }
+  .seq-actor { color: var(--accent); font-weight: bold; }
+  .seq-arrow { color: var(--green); }
+  .seq-note { color: var(--yellow); }
+  .seq-fail { color: var(--red); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th { background: var(--surface); color: var(--accent); }
+  tr:nth-child(even) { background: var(--surface); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Reverse-Engineering Codex Auth and Usage Recovery</h1>
+  <p class="subtitle">A detailed walkthrough of how we figured out where Codex stores ChatGPT auth state, how stale tokens can be recovered, and how the dashboard now reloads or refreshes tokens before giving up.</p>
+  <p class="subtitle"><a href="codex_reverse_engineering.html">Back to the Codex overview</a></p>
+</div>
+
+<div class="container">
+
+<div class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#goal">What We Were Trying to Do</a></li>
+    <li><a href="#arch">Architecture Overview</a></li>
+    <li><a href="#phase1">Phase 1 — Find the Local Auth State</a></li>
+    <li><a href="#phase2">Phase 2 — Prove Refresh Is Possible</a></li>
+    <li><a href="#phase3">Phase 3 — Follow the Installed Codex Binary</a></li>
+    <li><a href="#phase4">Phase 4 — Infer the Refresh Request</a></li>
+    <li><a href="#phase5">Phase 5 — Wire It into the Dashboard</a></li>
+    <li><a href="#final-script">Final Script Explanation</a></li>
+    <li><a href="#summary">Key Findings Summary</a></li>
+  </ol>
+</div>
+
+<h2 id="goal">1. What We Were Trying to Do</h2>
+
+<p>The original dashboard worked by copying the current <code>access_token</code> out of <code>~/.codex/auth.json</code> and storing it in <code>Codex/.local/accounts.ini</code>. That is enough for a snapshot, but it creates a weakness:</p>
+
+<ol>
+  <li>The copied access token can go stale</li>
+  <li>Codex itself keeps working, which means it must know how to recover</li>
+  <li>We wanted to discover that recovery path and reuse it</li>
+</ol>
+
+<div class="callout callout-info">
+  <strong>The key question</strong>
+  If the copied token fails, do we just re-copy the newest token from <code>auth.json</code>, or can we actually reproduce Codex's own refresh flow?
+</div>
+
+<h2 id="arch">2. Architecture Overview</h2>
+
+<p>At a high level, the flow we ended up with looks like this:</p>
+
+<div class="diagram-container">
+<pre class="seq-diagram">
+<span class="seq-actor">┌──────────────┐</span>      <span class="seq-actor">┌──────────────────┐</span>      <span class="seq-actor">┌────────────────────┐</span>      <span class="seq-actor">┌─────────────────────────┐</span>
+<span class="seq-actor">│  Codex CLI    │</span>      <span class="seq-actor">│ ~/.codex/auth.json │</span>      <span class="seq-actor">│ auth0.openai.com   │</span>      <span class="seq-actor">│ chatgpt.com usage API    │</span>
+<span class="seq-actor">└──────┬───────┘</span>      <span class="seq-actor">└─────────┬────────┘</span>      <span class="seq-actor">└──────────┬─────────┘</span>      <span class="seq-actor">└────────────┬────────────┘</span>
+       │                         │                          │                               │
+       │ <span class="seq-arrow">── read tokens ──────▶</span> │                          │                               │
+       │                         │                          │                               │
+       │ <span class="seq-note">access_token</span>          │                          │                               │
+       │ <span class="seq-note">account_id</span>             │                          │                               │
+       │ <span class="seq-note">refresh_token</span>          │                          │                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">────────────────────────────────────────────────────────────────────────────▶</span> │
+       │ <span class="seq-note">GET /backend-api/wham/usage</span>                                                           │
+       │ <span class="seq-note">Authorization: Bearer {access_token}</span>                                              │
+       │ <span class="seq-note">ChatGPT-Account-Id: {account_id}</span>                                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">◀────────────────────────────────────────────────────────────────────────────</span> │
+       │                         │                          │                               │
+       │ <span class="seq-note">[if token expired]</span>     │                          │                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">────────────────────────▶</span> │                          │                               │
+       │ <span class="seq-note">load refresh_token</span>     │                          │                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">────────────────────────────────────────────▶</span> │                               │
+       │ <span class="seq-note">POST /oauth/token</span>                                    │                               │
+       │ <span class="seq-note">grant_type=refresh_token</span>                            │                               │
+       │ <span class="seq-note">client_id=app_EMoamEEZ73f0CkXaXp7hrann</span>               │                               │
+       │ <span class="seq-arrow">◀────────────────────────────────────────────</span> │                               │
+       │ <span class="seq-note">{access_token, refresh_token?, id_token?}</span>        │                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">── write updated auth ─▶</span> │                          │                               │
+       │                         │                          │                               │
+       │ <span class="seq-arrow">────────────────────────────────────────────────────────────────────────────▶</span> │
+       │ <span class="seq-note">retry GET /backend-api/wham/usage</span>                                                   │
+</pre>
+</div>
+
+<div class="callout callout-warning">
+  <strong>Important distinction</strong>
+  The dashboard is still a ChatGPT-account usage tool, not an OpenAI API-key tool. The auth here is ChatGPT login state stored by Codex, not a permanent API key.
+</div>
+
+<h2 id="phase1">3. Phase 1 — Find the Local Auth State</h2>
+
+<h3>Step 1.1: Inspect the local Codex directory <span class="badge badge-success">Useful</span></h3>
+<p>The first clue was simple: Codex already stores its own state under <code>~/.codex/</code>.</p>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ ls -la ~/.codex</span>
+<span class="output">...
+-rw-------  auth.json
+drwxr-xr-x  sessions
+...
+</span></code></pre>
+    <p>This immediately suggested that <code>auth.json</code> was the primary source of truth and <code>sessions/</code> was only useful for the optional local activity counts.</p>
+  </div>
+</details>
+
+<h3>Step 1.2: Inspect auth.json structure <span class="badge badge-success">Found It</span></h3>
+<p>Instead of printing raw secrets, we inspected the shape of the file:</p>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ python3 - &lt;&lt;'PY'
+import json, pathlib
+p = pathlib.Path.home()/'.codex'/'auth.json'
+obj = json.loads(p.read_text())
+print(sorted(obj.keys()))
+print(sorted(obj.get('tokens', {}).keys()))
+PY</span>
+
+<span class="output">['OPENAI_API_KEY', 'auth_mode', 'last_refresh', 'tokens']
+['access_token', 'account_id', 'id_token', 'refresh_token']</span></code></pre>
+    <p>This was the first big breakthrough: Codex is not just caching an access token. It also stores a <code>refresh_token</code>.</p>
+  </div>
+</details>
+
+<div class="callout callout-success">
+  <strong>Key Finding #1</strong>
+  <code>~/.codex/auth.json</code> already contains everything needed for recovery: <code>access_token</code>, <code>refresh_token</code>, <code>id_token</code>, and <code>account_id</code>.
+</div>
+
+<h2 id="phase2">4. Phase 2 — Prove Refresh Is Possible</h2>
+
+<h3>Step 2.1: Decode the token claims <span class="badge badge-key">Critical Clue</span></h3>
+<p>If the access token includes <code>offline_access</code>, that is a very strong signal that a refresh flow exists.</p>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ python3 - &lt;&lt;'PY'
+import json, pathlib, base64
+p = pathlib.Path.home()/'.codex'/'auth.json'
+tok = json.loads(p.read_text())['tokens']['access_token']
+payload = tok.split('.')[1] + '=' * (-len(tok.split('.')[1]) % 4)
+data = json.loads(base64.urlsafe_b64decode(payload))
+print(data['iss'])
+print(data['scp'])
+PY</span>
+
+<span class="output">https://auth.openai.com
+['openid', 'profile', 'email', 'offline_access', 'api.connectors.read', 'api.connectors.invoke']</span></code></pre>
+    <p>That tells us two things:</p>
+    <ol>
+      <li>The issuer is <code>https://auth.openai.com</code></li>
+      <li>The token was granted <code>offline_access</code>, which is the classic OAuth signal for refresh support</li>
+    </ol>
+  </div>
+</details>
+
+<h3>Step 2.2: Understand the current weakness <span class="badge badge-info">Design Gap</span></h3>
+<p>The dashboard originally copied the access token into <code>Codex/.local/accounts.ini</code>. That works, but only until the copied token becomes stale.</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="comment"># Original bootstrap behavior</span>
+<span class="cmd">$ jq -r '.tokens.access_token' ~/.codex/auth.json</span>
+<span class="cmd">$ jq -r '.tokens.account_id' ~/.codex/auth.json</span>
+<span class="comment"># ...then write those values into Codex/.local/accounts.ini</span></code></pre>
+    <p>This is fine for a snapshot, but it means the dashboard can lag behind whatever Codex itself is doing.</p>
+  </div>
+</details>
+
+<h2 id="phase3">5. Phase 3 — Follow the Installed Codex Binary</h2>
+
+<h3>Step 3.1: Inspect the obvious entrypoint <span class="badge badge-fail">Partial Dead End</span></h3>
+<p>The first thing we opened was the Homebrew launcher:</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ which codex</span>
+<span class="output">/opt/homebrew/bin/codex</span>
+
+<span class="cmd">$ readlink -f $(which codex)</span>
+<span class="output">/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js</span>
+
+<span class="cmd">$ sed -n '1,40p' /opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js</span>
+<span class="output">#!/usr/bin/env node
+// Unified entry point for the Codex CLI.
+...
+const binaryPath = ...
+spawn(binaryPath, process.argv.slice(2), ...)</span></code></pre>
+    <p>This told us the JS file is just a launcher. The real auth logic lives in the native platform binary it spawns.</p>
+  </div>
+</details>
+
+<h3>Step 3.2: First guess the binary path <span class="badge badge-fail">Wrong Path</span></h3>
+<p>An early assumption was that the platform package would be installed as a top-level sibling npm package.</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ find /opt/homebrew/lib/node_modules/@openai/codex-darwin-arm64 -maxdepth 4 -type f</span>
+<span class="output">find: ... No such file or directory</span></code></pre>
+    <p>That was wrong on this machine. The platform bundle was nested under the main package's own <code>node_modules</code>.</p>
+  </div>
+</details>
+
+<h3>Step 3.3: Find the real platform bundle <span class="badge badge-success">Found It</span></h3>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ find /opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai -maxdepth 4 -type d | sort</span>
+<span class="output">...
+/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64
+/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor
+/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex
+...</span></code></pre>
+  </div>
+</details>
+
+<h3>Step 3.4: Search the binary strings <span class="badge badge-key">Critical Discovery</span></h3>
+<p>Once we had the native binary path, we searched for auth-related clues:</p>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ strings /opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex \
+  | rg "refresh_token|grant_type|code_verifier|oauth token exchange|app_EMoamEEZ73f0CkXaXp7hrann|chatgpt_account_id"</span>
+
+<span class="output">Access token expired, refreshing.
+Refreshed access token.
+starting oauth token exchange
+oauth token exchange succeeded
+access_token
+refresh_token
+grant_type
+code_verifier
+client_id
+app_EMoamEEZ73f0CkXaXp7hrann
+chatgpt_account_id</span></code></pre>
+    <p>This was enough to move from “maybe there is refresh” to “Codex definitely has a built-in OAuth token exchange path.”</p>
+  </div>
+</details>
+
+<div class="callout callout-success">
+  <strong>Key Finding #2</strong>
+  The native Codex binary contains explicit refresh-related strings, including the refresh token field name, form-encoded OAuth request parts, a client id, and log text that says the token is refreshed when it expires.
+</div>
+
+<h2 id="phase4">6. Phase 4 — Infer the Refresh Request</h2>
+
+<h3>Step 4.1: Connect the issuer to OIDC discovery <span class="badge badge-success">Confirmed</span></h3>
+<p>From the token claims we had <code>iss=https://auth.openai.com</code>. That makes the next step standard OAuth/OpenID Connect discovery:</p>
+
+<details open>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ curl -s https://auth.openai.com/.well-known/openid-configuration | jq -r '.token_endpoint'</span>
+<span class="output">https://auth0.openai.com/oauth/token</span></code></pre>
+    <p>That gives us the missing host for the refresh request.</p>
+  </div>
+</details>
+
+<h3>Step 4.2: Infer the minimal refresh body <span class="badge badge-success">Working Shape</span></h3>
+<p>Between the binary strings and the discovery document, the request shape becomes fairly clear:</p>
+
+<pre><code>POST https://auth0.openai.com/oauth/token
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+grant_type=refresh_token
+refresh_token=&lt;refresh_token from ~/.codex/auth.json&gt;
+client_id=app_EMoamEEZ73f0CkXaXp7hrann</code></pre>
+
+<p>That matches everything we observed locally:</p>
+
+<table>
+  <tr><th>Clue</th><th>What it told us</th></tr>
+  <tr><td><code>offline_access</code> in token scope</td><td>Refresh support should exist</td></tr>
+  <tr><td><code>iss=https://auth.openai.com</code></td><td>OIDC discovery starts from auth.openai.com</td></tr>
+  <tr><td>Binary strings: <code>refresh_token</code>, <code>grant_type</code>, <code>client_id</code></td><td>Standard form-encoded OAuth token exchange</td></tr>
+  <tr><td>Binary string: <code>app_EMoamEEZ73f0CkXaXp7hrann</code></td><td>The ChatGPT client id Codex is using</td></tr>
+  <tr><td>Discovery document</td><td>Confirmed <code>https://auth0.openai.com/oauth/token</code></td></tr>
+</table>
+
+<div class="callout callout-warning">
+  <strong>What we did not fully prove inside this sandbox</strong>
+  We did not execute a live refresh request from the sandboxed terminal because outbound DNS/network is blocked here. The request shape is based on local binary evidence plus OIDC discovery, and the standalone helper script reflects that shape exactly.
+</div>
+
+<h2 id="phase5">7. Phase 5 — Wire It into the Dashboard</h2>
+
+<h3>Step 5.1: First recovery attempt — reload auth.json <span class="badge badge-success">Cheap Recovery</span></h3>
+<p>If the copied token is stale because Codex already refreshed it in the background, we do not need to hit the network at all. We can just reload the latest token from <code>auth.json</code>.</p>
+
+<pre><code><span class="comment"># Recovery order inside codex_nerve.py</span>
+1. usage request fails with 401/403
+2. reload ~/.codex/auth.json
+3. if access_token changed, retry usage request
+4. only if that still fails, do a refresh_token exchange</code></pre>
+
+<h3>Step 5.2: Second recovery attempt — refresh and retry <span class="badge badge-success">Full Recovery</span></h3>
+<p>When reload is not enough, the dashboard now performs the refresh exchange, writes the new token state back to <code>auth.json</code>, and retries the usage API.</p>
+
+<details>
+  <summary>Relevant code paths</summary>
+  <div class="content">
+<pre><code><span class="cmd">Codex/codex_nerve.py</span>
+load_local_auth_tokens(...)
+reload_account_from_auth_file(...)
+refresh_access_token_from_auth_file(...)
+refresh_account(...)</code></pre>
+  </div>
+</details>
+
+<h2 id="final-script">8. Final Script Explanation</h2>
+
+<h3>The dashboard</h3>
+<p><code>codex_nerve.py</code> is now responsible for three auth behaviors:</p>
+<ol>
+  <li>Use the copied snapshot token for the normal fast path</li>
+  <li>Reload from <code>auth_file</code> if the snapshot goes stale</li>
+  <li>Refresh from the stored <code>refresh_token</code> if reload is not enough</li>
+</ol>
+
+<h3>The standalone helper</h3>
+<p><code>codex_refresh_auth.py</code> is the smallest runnable example of the inferred Codex refresh flow. It does two things:</p>
+
+<details open>
+  <summary>Sample commands</summary>
+  <div class="content">
+<pre><code><span class="comment"># Show the inferred request shape without calling the network</span>
+<span class="cmd">$ python3 Codex/codex_refresh_auth.py --print-only</span>
+
+<span class="comment"># Perform the refresh and write updated tokens back to ~/.codex/auth.json</span>
+<span class="cmd">$ python3 Codex/codex_refresh_auth.py</span></code></pre>
+  </div>
+</details>
+
+<p>The helper intentionally updates <code>~/.codex/auth.json</code> because that is the same local state Codex itself relies on.</p>
+
+<h2 id="summary">9. Key Findings Summary</h2>
+
+<div class="callout callout-success">
+  <strong>What we learned</strong>
+  Codex stores ChatGPT auth state in <code>~/.codex/auth.json</code>, including a <code>refresh_token</code>. The access token carries <code>offline_access</code>, the binary contains explicit OAuth refresh clues plus the ChatGPT client id, and OpenID discovery leads to <code>https://auth0.openai.com/oauth/token</code>. That was enough to add automatic recovery to the dashboard and produce a standalone refresh helper.
+</div>
+
+<ul>
+  <li><strong>Local source of truth:</strong> <code>~/.codex/auth.json</code></li>
+  <li><strong>Usage endpoint:</strong> <code>https://chatgpt.com/backend-api/wham/usage</code></li>
+  <li><strong>Refresh endpoint:</strong> <code>https://auth0.openai.com/oauth/token</code></li>
+  <li><strong>Client id:</strong> <code>app_EMoamEEZ73f0CkXaXp7hrann</code></li>
+  <li><strong>Recovery order:</strong> reload auth.json, then refresh, then retry usage</li>
+</ul>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RevEng101 - Reverse Engineering Projects</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #58a6ff;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        .projects {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
+            max-width: 960px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: border-color 0.2s;
+        }
+        .card:hover { border-color: #58a6ff; }
+        .card h2 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+        .card h2 a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+        .card h2 a:hover { text-decoration: underline; }
+        .card p { color: #8b949e; font-size: 0.95rem; line-height: 1.5; }
+        .tag {
+            display: inline-block;
+            background: #1f6feb22;
+            color: #58a6ff;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-top: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>RevEng101</h1>
+    <p class="subtitle">Reverse engineering projects</p>
+
+    <div class="projects">
+        <div class="card">
+            <h2><a href="UsageDashboard/index.html">Usage Dashboard</a></h2>
+            <p>Reverse engineering Claude Code and Codex authorization flows, OAuth tokens, and API usage tracking.</p>
+            <span class="tag">auth &amp; usage APIs</span>
+        </div>
+
+        <!-- Add new project cards here -->
+    </div>
+</body>
+</html>

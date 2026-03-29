@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Analysis Deep Dive — How to Read Minified JS in Compiled Binaries</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --pink: #f778ba;
+    --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 50%, #1a1a2e 100%);
+    padding: 60px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.2em;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, var(--orange), var(--yellow));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .subtitle { color: var(--text-dim); font-size: 1.1em; max-width: 750px; margin: 0 auto; }
+  .hero .back-link { display: inline-block; margin-top: 16px; color: var(--accent); font-size: 0.9em; text-decoration: none; }
+  .hero .back-link:hover { text-decoration: underline; }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+  h2 { font-size: 1.6em; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--accent); }
+  h3 { font-size: 1.2em; margin: 28px 0 12px; color: var(--purple); }
+  h4 { font-size: 1.05em; margin: 20px 0 8px; color: var(--yellow); }
+  p, li { color: var(--text); margin-bottom: 10px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.86em;
+    line-height: 1.55;
+    margin: 12px 0 20px;
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.92em;
+  }
+  :not(pre) > code {
+    background: var(--surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--orange);
+  }
+  .cmd { color: var(--green); }
+  .comment { color: var(--text-dim); font-style: italic; }
+  .output { color: var(--text-dim); }
+  .highlight { color: var(--yellow); font-weight: bold; }
+  .minified { color: var(--pink); font-weight: bold; }
+  .decoded { color: var(--green); font-weight: bold; }
+  .clue { color: var(--orange); }
+
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  details[open] { border-color: var(--accent); }
+  summary {
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+  }
+  summary:hover { background: var(--surface2); }
+  summary::marker { content: ''; }
+  summary::before {
+    content: '▶'; font-size: 0.7em; transition: transform 0.2s;
+    display: inline-block; width: 16px;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > .content { padding: 0 18px 18px; }
+
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px;
+    font-size: 0.78em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-left: 8px;
+  }
+  .badge-concept { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+  .badge-technique { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+  .badge-example { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+
+  .callout {
+    border-left: 4px solid;
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+  .callout-success { border-color: var(--green); background: rgba(63,185,80,0.08); }
+  .callout-warning { border-color: var(--yellow); background: rgba(210,153,34,0.08); }
+  .callout-info { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+  .callout-concept { border-color: var(--purple); background: rgba(188,140,255,0.08); }
+  .callout strong { display: block; margin-bottom: 4px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9em;
+  }
+  th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+  th { background: var(--surface); color: var(--accent); }
+  tr:nth-child(even) { background: var(--surface); }
+
+  /* Annotation overlay for code */
+  .annotated-code {
+    position: relative;
+  }
+  .annotation {
+    background: rgba(88,166,255,0.1);
+    border: 1px dashed var(--accent);
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin: 4px 0 12px 20px;
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+  .annotation::before {
+    content: '↑ ';
+    font-weight: bold;
+  }
+  .annotation.warn {
+    background: rgba(210,153,34,0.1);
+    border-color: var(--yellow);
+    color: var(--yellow);
+  }
+
+  /* Mental model diagram */
+  .mental-model {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 24px 0;
+    overflow-x: auto;
+  }
+  .mental-model pre {
+    border: none;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin: 24px 0;
+  }
+  .toc h3 { margin-top: 0; color: var(--text); }
+  .toc ol { margin-bottom: 0; }
+  .toc li { margin-bottom: 6px; }
+
+  /* Deduction chain */
+  .deduction {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 16px 0;
+  }
+  .deduction-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: none;
+  }
+  .deduction-step:first-child { border-radius: 8px 8px 0 0; }
+  .deduction-step:last-child { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+  .deduction-step:only-child { border-radius: 8px; border-bottom: 1px solid var(--border); }
+  .deduction-num {
+    min-width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8em; font-weight: 700;
+  }
+  .deduction-observe .deduction-num { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .deduction-infer .deduction-num { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .deduction-verify .deduction-num { background: rgba(63,185,80,0.2); color: var(--green); }
+  .step-label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 2px; }
+  .deduction-observe .step-label { color: var(--accent); }
+  .deduction-infer .step-label { color: var(--yellow); }
+  .deduction-verify .step-label { color: var(--green); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Binary Analysis Deep Dive</h1>
+  <p class="subtitle">How to read minified JavaScript inside compiled binaries, and the reasoning chain that turned cryptic variable names into working API calls.</p>
+  <a href="claude_oauth_guide.html" class="back-link">&larr; Back to main OAuth guide</a>
+</div>
+
+<div class="container">
+
+<div class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#what-is-binary">What Kind of Binary Is This?</a></li>
+    <li><a href="#strings-101">The <code>strings</code> Command — Your X-Ray Vision</a></li>
+    <li><a href="#minification">Understanding JavaScript Minification</a></li>
+    <li><a href="#search-strategy">Search Strategy — How to Find What You Need</a></li>
+    <li><a href="#decoding-vw8">Decoding VW8 — The OAuth Config Object</a></li>
+    <li><a href="#decoding-ch9">Decoding CH9 — The Beta Header</a></li>
+    <li><a href="#decoding-ek">Decoding eK_ — The OAuth Scopes</a></li>
+    <li><a href="#decoding-refresh">Decoding the Refresh Request Shape</a></li>
+    <li><a href="#connecting-dots">Connecting Code to curl — The Translation Process</a></li>
+    <li><a href="#techniques">General Binary Analysis Techniques</a></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="what-is-binary">1. What Kind of Binary Is This?</h2>
+
+<p>The first step in any binary analysis is understanding <em>what you're looking at</em>:</p>
+
+<details open>
+  <summary>Identifying the binary type</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ file ~/.local/share/claude/versions/2.1.87</span>
+<span class="output">Mach-O 64-bit executable arm64</span></code></pre>
+
+<p>This tells us it's a native macOS ARM binary. But Claude Code is written in <strong>TypeScript/JavaScript</strong>. So how is it a native binary?</p>
+  </div>
+</details>
+
+<div class="callout callout-concept">
+  <strong>Key Concept: Bun-compiled JavaScript</strong>
+  <p>Claude Code uses <a href="https://bun.sh">Bun</a> (a JavaScript runtime) to compile the TypeScript source into a single native executable. The process works like this:</p>
+  <ol>
+    <li><strong>Bundle:</strong> All JS/TS source files are bundled into a single file (like webpack/esbuild)</li>
+    <li><strong>Minify:</strong> Variable names are shortened, whitespace removed</li>
+    <li><strong>Embed:</strong> The minified JS is embedded as a string resource inside a native Bun runtime binary</li>
+  </ol>
+  <p>This means the <strong>entire JavaScript source code</strong> — minified but structurally intact — is sitting inside the binary as readable ASCII text. The <code>strings</code> command can extract it.</p>
+</div>
+
+<div class="mental-model">
+<pre><code>
+  ┌─────────────────────────────────────────────────────────┐
+  │               Mach-O Binary (arm64)                      │
+  │  ┌──────────────────────────────────────────────────┐   │
+  │  │  Bun Runtime (compiled C/Zig code)               │   │
+  │  │  - JavaScript engine                              │   │
+  │  │  - Node.js compatibility layer                    │   │
+  │  │  - HTTP client, crypto, fs, etc.                  │   │
+  │  └──────────────────────────────────────────────────┘   │
+  │  ┌──────────────────────────────────────────────────┐   │
+  │  │  <span class="highlight">Embedded JavaScript Bundle (minified)</span>             │   │
+  │  │                                                    │   │
+  │  │  This is what <code>strings</code> extracts!                   │   │
+  │  │                                                    │   │
+  │  │  var <span class="minified">VW8</span>={BASE_API_URL:"https://...",          │   │
+  │  │      TOKEN_URL:"https://...",                      │   │
+  │  │      CLIENT_ID:"9d1c250a-..."};                    │   │
+  │  │  var <span class="minified">CH9</span>="files-api-2025-04-14,oauth-...";     │   │
+  │  │  var <span class="minified">eK_</span>=["user:inference",...];               │   │
+  │  │  ...hundreds of thousands of lines...              │   │
+  │  └──────────────────────────────────────────────────┘   │
+  │  ┌──────────────────────────────────────────────────┐   │
+  │  │  Other embedded resources (icons, etc.)           │   │
+  │  └──────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────┘
+</code></pre>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="strings-101">2. The <code>strings</code> Command — Your X-Ray Vision</h2>
+
+<div class="callout callout-info">
+  <strong>What does <code>strings</code> do?</strong>
+  <p>The <code>strings</code> command scans a binary file and extracts every sequence of printable ASCII characters that is at least 4 characters long (by default). It doesn't "decompile" anything — it just finds readable text embedded in the raw bytes.</p>
+</div>
+
+<p>For a Bun-compiled JS app, <code>strings</code> extracts:</p>
+<ul>
+  <li>The entire minified JavaScript source (string literals, object keys, URLs, etc.)</li>
+  <li>Error messages and log strings</li>
+  <li>Bundled dependency code (AWS SDK, Azure SDK, etc. — lots of noise)</li>
+  <li>Native Bun runtime strings</li>
+</ul>
+
+<h3>The scale of output</h3>
+
+<details>
+  <summary>How much text is embedded?</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ strings ~/.local/share/claude/versions/2.1.87 | wc -l</span>
+<span class="output">~2,400,000 lines</span>
+
+<span class="cmd">$ strings ~/.local/share/claude/versions/2.1.87 | wc -c</span>
+<span class="output">~180 MB of text</span></code></pre>
+    <p>That's <strong>2.4 million lines</strong> of extracted strings. You cannot read this manually. You <em>must</em> use targeted search patterns (grep) to find what you need.</p>
+  </div>
+</details>
+
+<div class="callout callout-warning">
+  <strong>The Noise Problem</strong>
+  <p>Claude Code bundles many third-party libraries (AWS SDK, Azure Identity SDK, various Node.js packages). A naive search like <code>grep "token"</code> returns tens of thousands of results from these libraries. The art of binary analysis is crafting searches that <strong>filter out the noise</strong> and find <strong>Anthropic-specific code</strong>.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="minification">3. Understanding JavaScript Minification</h2>
+
+<p>Before we can interpret what we find, we need to understand what minification does to JavaScript code.</p>
+
+<h3>What a bundler/minifier does</h3>
+
+<div class="mental-model">
+<pre><code><span class="comment">// ── ORIGINAL SOURCE CODE (what developers wrote) ──────────────</span>
+
+<span class="decoded">const OAUTH_CONFIG</span> = {
+  <span class="decoded">BASE_API_URL</span>: "https://api.anthropic.com",
+  <span class="decoded">TOKEN_URL</span>: "https://platform.claude.com/v1/oauth/token",
+  <span class="decoded">CLIENT_ID</span>: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+};
+
+<span class="decoded">const BETA_FEATURES</span> = "files-api-2025-04-14,oauth-2025-04-20";
+<span class="decoded">const API_VERSION</span> = "2023-06-01";
+
+<span class="decoded">const DEFAULT_SCOPES</span> = [
+  "user:inference",
+  "user:inference:claude_code",
+  "user:sessions:claude_code",
+  "user:mcp_servers",
+  "user:file_upload"
+];
+
+<span class="comment">// ── AFTER MINIFICATION (what ends up in the binary) ───────────</span>
+
+<span class="minified">VW8</span>={BASE_API_URL:"https://api.anthropic.com",TOKEN_URL:"https://platform.claude.com/v1/oauth/token",CLIENT_ID:"9d1c250a-e61b-44d9-88ed-5944d1962f5e"}
+<span class="minified">CH9</span>="files-api-2025-04-14,oauth-2025-04-20"
+<span class="minified">bH9</span>="2023-06-01"
+<span class="minified">eK_</span>=["user:inference","user:inference:claude_code","user:sessions:claude_code","user:mcp_servers","user:file_upload"]
+</code></pre>
+</div>
+
+<h3>What gets renamed vs. what stays</h3>
+
+<table>
+  <thead>
+    <tr><th>Element</th><th>Renamed?</th><th>Why?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Variable names</strong><br><code>OAUTH_CONFIG</code> → <code>VW8</code></td>
+      <td style="color:var(--red)">Yes — always</td>
+      <td>Safe to rename because only internal code references them</td>
+    </tr>
+    <tr>
+      <td><strong>Object property keys</strong><br><code>BASE_API_URL</code>, <code>CLIENT_ID</code></td>
+      <td style="color:var(--green)">No — usually preserved</td>
+      <td>Properties might be accessed via dynamic string lookup (<code>obj["CLIENT_ID"]</code>), or used in APIs — the minifier can't safely rename them</td>
+    </tr>
+    <tr>
+      <td><strong>String literals</strong><br><code>"https://api.anthropic.com"</code></td>
+      <td style="color:var(--green)">No — never</td>
+      <td>Strings are data, not identifiers. Renaming them would change program behavior</td>
+    </tr>
+    <tr>
+      <td><strong>String keys in JSON/requests</strong><br><code>"grant_type"</code>, <code>"refresh_token"</code></td>
+      <td style="color:var(--green)">No — never</td>
+      <td>These are wire protocol names — they must match what the server expects</td>
+    </tr>
+    <tr>
+      <td><strong>Function names</strong><br><code>refreshAccessToken</code> → <code>_S</code></td>
+      <td style="color:var(--red)">Yes — usually</td>
+      <td>Internal function references are safe to shorten</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-success">
+  <strong>The Golden Rule of Binary Analysis</strong>
+  <p><strong>String literals and object property names survive minification.</strong> This means URLs, API keys, header values, request field names, error messages, and scope strings are all readable in the binary exactly as the developer wrote them. Only <em>variable names</em> and <em>function names</em> get mangled.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="search-strategy">4. Search Strategy — How to Find What You Need</h2>
+
+<p>With 2.4 million lines to search, strategy matters. Here's the general approach:</p>
+
+<h3>Strategy: Start with what you know, follow the thread</h3>
+
+<div class="deduction">
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">1</div>
+    <div>
+      <div class="step-label">Anchor on Known Strings</div>
+      <p>Search for strings you already know must exist — URLs, domain names, header names that you saw in HTTP responses, error messages you received.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">2</div>
+    <div>
+      <div class="step-label">Read the Surrounding Context</div>
+      <p>When you find a hit, look at what's around it. Minified code is dense — a single line often contains an entire function or config object.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">3</div>
+    <div>
+      <div class="step-label">Identify Structure</div>
+      <p>Object literals <code>{key:"value",...}</code>, array literals <code>[a,b,c]</code>, and function signatures retain their shape. You can read the structure even with mangled variable names.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-verify">
+    <div class="deduction-num">4</div>
+    <div>
+      <div class="step-label">Test Your Hypothesis</div>
+      <p>Turn your reading into a curl command and test it. A 200 or 429 means you're right. A 400 means the format is wrong. A 404 means wrong endpoint.</p>
+    </div>
+  </div>
+</div>
+
+<h3>Filtering out noise</h3>
+
+<p>The binary contains massive amounts of third-party code. Key filtering patterns:</p>
+
+<pre><code><span class="comment"># GOOD — target Anthropic-specific strings</span>
+<span class="cmd">strings binary | grep -E "anthropic|claude" | grep -v "github\|docs\|mailto"</span>
+
+<span class="comment"># GOOD — search for URLs with specific path patterns</span>
+<span class="cmd">strings binary | grep -oE "https://[^ \"']*anthropic[^ \"']*"</span>
+
+<span class="comment"># GOOD — extract JSON-like object literals</span>
+<span class="cmd">strings binary | grep -oE '\{[^}]*refresh_token[^}]*\}'</span>
+
+<span class="comment"># BAD — too broad, drowns in AWS/Azure SDK results</span>
+<span class="cmd">strings binary | grep "token"         </span><span class="comment"># → tens of thousands of hits</span>
+<span class="cmd">strings binary | grep "refresh"       </span><span class="comment"># → hundreds of Azure MSAL hits</span>
+<span class="cmd">strings binary | grep "client_id"     </span><span class="comment"># → Azure, Google, Notion, GitHub hits</span></code></pre>
+
+<div class="callout callout-info">
+  <strong>The <code>-oE</code> Flag is Your Best Friend</strong>
+  <p><code>grep -oE 'pattern'</code> prints <strong>only the matched portion</strong>, not the entire line. Since minified JS lines can be hundreds of thousands of characters long, this is essential. Without <code>-o</code>, a single match could dump 500KB of text.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="decoding-vw8">5. Decoding <code>VW8</code> — The OAuth Config Object</h2>
+
+<p>This is the most information-rich discovery. Let me walk through exactly how I found it and how I knew what it meant.</p>
+
+<h3>The search that found it</h3>
+
+<p>I was looking for the <code>eK_</code> variable (the scopes array) because an earlier search had shown it held OAuth scopes. I searched for its name:</p>
+
+<pre><code><span class="cmd">$ strings /path/to/claude | grep "eK_" | head -5</span></code></pre>
+
+<p>One of the results contained this massive line (reformatted for readability):</p>
+
+<details open>
+  <summary>The raw extracted code <span class="badge badge-example">Annotated</span></summary>
+  <div class="content">
+<pre><code><span class="minified">eK_</span>=[<span class="minified">A1H</span>,<span class="minified">_S</span>,
+  "user:sessions:claude_code",
+  "user:mcp_servers",
+  "user:file_upload"],
+
+<span class="minified">a96</span>=Array.from(new Set([...<span class="minified">EW8</span>,...<span class="minified">eK_</span>])),
+
+<span class="minified">VW8</span>={
+  <span class="clue">BASE_API_URL</span>:"https://api.anthropic.com",
+  <span class="clue">CONSOLE_AUTHORIZE_URL</span>:"https://platform.claude.com/oauth/authorize",
+  <span class="clue">CLAUDE_AI_AUTHORIZE_URL</span>:"https://claude.com/cai/oauth/authorize",
+  <span class="clue">CLAUDE_AI_ORIGIN</span>:"https://claude.ai",
+  <span class="highlight">TOKEN_URL</span>:<span class="highlight">"https://platform.claude.com/v1/oauth/token"</span>,
+  <span class="clue">API_KEY_URL</span>:"https://api.anthropic.com/api/oauth/claude_cli/create_api_key",
+  <span class="clue">ROLES_URL</span>:"https://api.anthropic.com/api/oauth/claude_cli/roles",
+  <span class="clue">CONSOLE_SUCCESS_URL</span>:"https://platform.claude.com/buy_credits?...",
+  <span class="clue">CLAUDEAI_SUCCESS_URL</span>:"https://platform.claude.com/oauth/code/success?app=claude-code",
+  <span class="clue">MANUAL_REDIRECT_URL</span>:"https://platform.claude.com/oauth/code/callback",
+  <span class="highlight">CLIENT_ID</span>:<span class="highlight">"9d1c250a-e61b-44d9-88ed-5944d1962f5e"</span>,
+  <span class="clue">OAUTH_FILE_SUFFIX</span>:"",
+  <span class="clue">MCP_PROXY_URL</span>:"https://mcp-proxy.anthropic.com",
+  <span class="clue">MCP_PROXY_PATH</span>:"/v1/mcp/{server_id}"
+}</code></pre>
+  </div>
+</details>
+
+<h3>How I knew what <code>VW8</code> was</h3>
+
+<div class="deduction">
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">1</div>
+    <div>
+      <div class="step-label">Observe</div>
+      <p>The object has property names like <code>BASE_API_URL</code>, <code>TOKEN_URL</code>, <code>CLIENT_ID</code>, <code>AUTHORIZE_URL</code>. These are <strong>SCREAMING_SNAKE_CASE constants</strong> — a convention for configuration constants.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">2</div>
+    <div>
+      <div class="step-label">Observe</div>
+      <p>The values are all URLs related to OAuth: authorization endpoints, token endpoints, redirect URLs. This is clearly an <strong>OAuth configuration object</strong>.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">3</div>
+    <div>
+      <div class="step-label">Infer</div>
+      <p>Property names survived minification because the minifier detected they were accessed by string key elsewhere (e.g., <code>config["CLIENT_ID"]</code> or via <code>Object.keys()</code>). The variable name <code>VW8</code> is meaningless — it was originally something like <code>OAUTH_DEFAULTS</code> or <code>CLAUDE_CONFIG</code>.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">4</div>
+    <div>
+      <div class="step-label">Infer</div>
+      <p><code>TOKEN_URL</code> points to <code>platform.claude.com</code>, not <code>api.anthropic.com</code>. This tells us token operations (refresh, exchange) go to a <strong>different host</strong> than API calls.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-verify">
+    <div class="deduction-num">5</div>
+    <div>
+      <div class="step-label">Verify</div>
+      <p>We tested <code>curl -s https://platform.claude.com/v1/oauth/token ...</code> and got a <code>429</code> (rate limited) instead of a <code>404</code> (not found), confirming the endpoint exists and accepts requests.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="decoding-ch9">6. Decoding <code>CH9</code> — The Beta Header</h2>
+
+<p>This was the single most critical discovery — without this header, nothing works.</p>
+
+<h3>How I found it</h3>
+
+<p>After the first API call failed with "OAuth authentication is currently not supported", I knew there was something extra needed. I searched for beta-related strings:</p>
+
+<pre><code><span class="cmd">$ strings /path/to/claude | grep -E "anthropic-beta|oauth-20" | sort -u</span></code></pre>
+
+<p>But this returned noise. The breakthrough came from a broader URL-extraction search:</p>
+
+<pre><code><span class="cmd">$ strings /path/to/claude | grep -E "api\.anthropic\.com" \
+  | grep -v "github\|docs\|mailto\|billing" | sort -u</span></code></pre>
+
+<p>This returned a large chunk of minified code, and within it was this fragment:</p>
+
+<pre><code><span class="minified">CH9</span>=<span class="highlight">"files-api-2025-04-14,oauth-2025-04-20"</span>,<span class="minified">bH9</span>=<span class="highlight">"2023-06-01"</span></code></pre>
+
+<h3>How I knew these were HTTP headers</h3>
+
+<div class="deduction">
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">1</div>
+    <div>
+      <div class="step-label">Observe the Values</div>
+      <p><code>"files-api-2025-04-14,oauth-2025-04-20"</code> — This is a comma-separated list of feature identifiers with dates. Anthropic uses this exact format for their <code>anthropic-beta</code> header (documented in their public API docs for features like "prompt caching").</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">2</div>
+    <div>
+      <div class="step-label">Observe the Sibling</div>
+      <p><code>"2023-06-01"</code> is right next to it. This is the well-known <code>anthropic-version</code> header value — it's in every Anthropic API example. Two header values defined side by side strongly suggests they're used together in request headers.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">3</div>
+    <div>
+      <div class="step-label">Pattern Match</div>
+      <p>The value <code>"oauth-2025-04-20"</code> contains "oauth" — and our problem was that OAuth didn't work. This beta flag literally says "enable OAuth" with a date. This is the missing piece.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">4</div>
+    <div>
+      <div class="step-label">Variable Naming Pattern</div>
+      <p><code>CH9</code> and <code>bH9</code> share a suffix (<code>H9</code>). In minified code, variables defined near each other often get sequential names. Two header values would be defined in the same block of code → similar minified names.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-verify">
+    <div class="deduction-num">5</div>
+    <div>
+      <div class="step-label">Verify</div>
+      <p>Added <code>anthropic-beta: files-api-2025-04-14,oauth-2025-04-20</code> to the curl request → <strong>HTTP 200</strong>. The exact same request without it → HTTP 401. Confirmed.</p>
+    </div>
+  </div>
+</div>
+
+<div class="callout callout-concept">
+  <strong>Why the minifier didn't rename the string values</strong>
+  <p>Remember: <code>CH9</code> is a <em>variable name</em> — the minifier renamed it. But <code>"files-api-2025-04-14,oauth-2025-04-20"</code> is a <em>string literal</em> — it's data that gets sent over the wire. The minifier can never change string values because that would break the program. This is why binary analysis of JS apps is so productive: <strong>all the important data survives minification</strong>.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="decoding-ek">7. Decoding <code>eK_</code> — The OAuth Scopes</h2>
+
+<h3>The search</h3>
+
+<p>To find the refresh token request format, I searched for code patterns containing <code>refresh_token</code> as a JSON/object key:</p>
+
+<pre><code><span class="cmd">$ strings /path/to/claude | grep -oE '\{[^}]*refresh_token[^}]*\}' | grep -v azure -i</span></code></pre>
+
+<p>This clever regex (<code>\{[^}]*refresh_token[^}]*\}</code>) matches any <code>{...}</code> block containing the text <code>refresh_token</code>, extracting just the object literal. The <code>-v azure</code> filters out Azure SDK noise.</p>
+
+<p>One of the results was:</p>
+
+<pre><code>{let q={<span class="clue">grant_type</span>:"refresh_token",<span class="clue">refresh_token</span>:H,<span class="clue">client_id</span>:<span class="minified">m8</span>().<span class="clue">CLIENT_ID</span>,<span class="clue">scope</span>:((_?.length)?_:<span class="minified">eK_</span>).join(" ")}}</code></pre>
+
+<h3>How I decoded this line</h3>
+
+<div class="deduction">
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">1</div>
+    <div>
+      <div class="step-label">Observe the Object Shape</div>
+      <p>This is an object literal being assigned to <code>q</code>. The keys are: <code>grant_type</code>, <code>refresh_token</code>, <code>client_id</code>, <code>scope</code>. These are <strong>standard OAuth2 token request parameters</strong> — they match the <a href="https://datatracker.ietf.org/doc/html/rfc6749#section-6">RFC 6749 Section 6</a> spec exactly.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">2</div>
+    <div>
+      <div class="step-label">Observe <code>m8().CLIENT_ID</code></div>
+      <p><code>m8()</code> is a minified function call that returns an object with a <code>CLIENT_ID</code> property. Since we already found <code>VW8</code> has a <code>CLIENT_ID</code> property, <code>m8()</code> likely returns <code>VW8</code> (or a wrapper around it). The minifier renamed the function but kept the property name.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-observe">
+    <div class="deduction-num">3</div>
+    <div>
+      <div class="step-label">Observe the Scope Logic</div>
+      <p><code>((_?.length) ? _ : eK_).join(" ")</code> means: "If a scopes argument was passed, use it; otherwise use the default scopes array (<code>eK_</code>), then join with spaces." This tells us <code>eK_</code> is the <strong>default scopes array</strong>.</p>
+    </div>
+  </div>
+  <div class="deduction-step deduction-infer">
+    <div class="deduction-num">4</div>
+    <div>
+      <div class="step-label">Infer the Full Request</div>
+      <p>Combining everything: <code>POST</code> to <code>VW8.TOKEN_URL</code> with body <code>grant_type=refresh_token&amp;refresh_token=...&amp;client_id=VW8.CLIENT_ID&amp;scope=eK_.join(" ")</code></p>
+    </div>
+  </div>
+</div>
+
+<p>Then I searched for <code>eK_</code> to find its definition:</p>
+
+<pre><code><span class="minified">eK_</span>=[<span class="minified">A1H</span>,<span class="minified">_S</span>,"user:sessions:claude_code","user:mcp_servers","user:file_upload"]</code></pre>
+
+<p>Three string literals are visible directly. <code>A1H</code> and <code>_S</code> are minified references. From another nearby line:</p>
+
+<pre><code><span class="minified">eK_</span>,<span class="clue">CLAUDE_AI_INFERENCE_SCOPE</span>:()=><span class="minified">_S</span>,<span class="clue">ALL_OAUTH_SCOPES</span>:()=><span class="minified">a96</span></code></pre>
+
+<p>The export name <code>CLAUDE_AI_INFERENCE_SCOPE</code> tells us <code>_S</code> = <code>"user:inference:claude_code"</code> (or similar). And by process of elimination with standard Anthropic scope naming, <code>A1H</code> = <code>"user:inference"</code>.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="decoding-refresh">8. Decoding the Refresh Request Shape</h2>
+
+<p>Beyond the request body, I also found the response shape in the same search:</p>
+
+<pre><code>{<span class="clue">access_token</span>:O,<span class="clue">refresh_token</span>:T=H,<span class="clue">expires_in</span>:z}</code></pre>
+
+<h3>Decoding the destructuring</h3>
+
+<p>This is a JavaScript <strong>destructuring assignment</strong>. In readable form:</p>
+
+<pre><code><span class="comment">// Minified:</span>
+{access_token:O, refresh_token:T=H, expires_in:z}
+
+<span class="comment">// De-minified (what the developer wrote):</span>
+{
+  access_token: <span class="decoded">newAccessToken</span>,        <span class="comment">// O = the new access token</span>
+  refresh_token: <span class="decoded">newRefreshToken</span> = <span class="decoded">oldRefreshToken</span>,  <span class="comment">// T=H means: default to old if not present</span>
+  expires_in: <span class="decoded">expiresIn</span>               <span class="comment">// z = seconds until expiry</span>
+}</code></pre>
+
+<div class="callout callout-concept">
+  <strong>Reading Destructuring with Defaults</strong>
+  <p><code>refresh_token: T = H</code> means "extract the <code>refresh_token</code> field into variable <code>T</code>; if it's <code>undefined</code>, use <code>H</code> as the default." Since <code>H</code> is the parameter name for the old refresh token (seen in the request object above), this tells us: <strong>the server may or may not return a new refresh token — if it doesn't, the old one is still valid.</strong></p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="connecting-dots">9. Connecting Code to curl — The Translation Process</h2>
+
+<p>Here's how each piece of minified JS maps to the final curl command:</p>
+
+<h3>For the usage check (API call)</h3>
+
+<table>
+  <thead>
+    <tr><th>Minified Code Fragment</th><th>What It Means</th><th>curl Translation</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code><span class="minified">VW8</span>.BASE_API_URL</code></td>
+      <td>API base URL</td>
+      <td><code>https://api.anthropic.com</code></td>
+    </tr>
+    <tr>
+      <td><code>/v1/messages</code> (found via URL search)</td>
+      <td>Messages endpoint path</td>
+      <td>Appended to base URL</td>
+    </tr>
+    <tr>
+      <td><code>Authorization: Bearer</code> + token from keychain</td>
+      <td>OAuth Bearer auth</td>
+      <td><code>-H "Authorization: Bearer $TOKEN"</code></td>
+    </tr>
+    <tr>
+      <td><code><span class="minified">bH9</span>="2023-06-01"</code></td>
+      <td>API version header</td>
+      <td><code>-H "anthropic-version: 2023-06-01"</code></td>
+    </tr>
+    <tr>
+      <td><code><span class="minified">CH9</span>="files-api-2025-04-14,oauth-2025-04-20"</code></td>
+      <td>Beta features header</td>
+      <td><code>-H "anthropic-beta: oauth-2025-04-20"</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>For the token refresh</h3>
+
+<table>
+  <thead>
+    <tr><th>Minified Code Fragment</th><th>What It Means</th><th>curl Translation</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code><span class="minified">VW8</span>.TOKEN_URL</code></td>
+      <td>Token endpoint</td>
+      <td><code>https://platform.claude.com/v1/oauth/token</code></td>
+    </tr>
+    <tr>
+      <td><code>grant_type:"refresh_token"</code></td>
+      <td>OAuth2 grant type</td>
+      <td><code>grant_type=refresh_token</code></td>
+    </tr>
+    <tr>
+      <td><code>refresh_token:H</code></td>
+      <td>The refresh token parameter</td>
+      <td><code>refresh_token=$REFRESH_TOKEN</code></td>
+    </tr>
+    <tr>
+      <td><code><span class="minified">m8</span>().CLIENT_ID</code> → <code><span class="minified">VW8</span>.CLIENT_ID</code></td>
+      <td>OAuth client identifier</td>
+      <td><code>client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e</code></td>
+    </tr>
+    <tr>
+      <td><code><span class="minified">eK_</span>.join(" ")</code></td>
+      <td>Space-separated scopes</td>
+      <td><code>scope=user:inference%20user:inference:claude_code%20...</code></td>
+    </tr>
+    <tr>
+      <td><code>.join(" ")</code> → scopes joined with spaces</td>
+      <td>Content type must be form-encoded</td>
+      <td><code>-H "content-type: application/x-www-form-urlencoded"</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-info">
+  <strong>How I knew it was form-encoded, not JSON</strong>
+  <p>The code builds a plain object <code>q = {grant_type: ..., ...}</code> and there's no <code>JSON.stringify</code> visible. In the HTTP/OAuth world, when a token endpoint receives parameters, the standard format is <code>application/x-www-form-urlencoded</code> per <a href="https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3">RFC 6749</a>. I also confirmed this by trying JSON first (which returned 400) and then form-encoded (which returned 429 — valid but rate-limited).</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════ -->
+<h2 id="techniques">10. General Binary Analysis Techniques</h2>
+
+<p>Summary of techniques used, applicable to any Bun/Electron/Node.js compiled binary:</p>
+
+<h3>Technique 1: URL Extraction</h3>
+<pre><code><span class="comment"># Extract all URLs mentioning a domain</span>
+<span class="cmd">strings binary | grep -oE "https://[^ \"']*yourdomain[^ \"']*" | sort -u</span></code></pre>
+<p><strong>When to use:</strong> First step in any analysis. Gives you all API endpoints, auth URLs, CDN paths, etc.</p>
+
+<h3>Technique 2: Object Literal Extraction</h3>
+<pre><code><span class="comment"># Extract {key:value} objects containing a specific key</span>
+<span class="cmd">strings binary | grep -oE '\{[^}]*keyword[^}]*\}'</span></code></pre>
+<p><strong>When to use:</strong> When you know a field name (like <code>refresh_token</code>) and want to see the full request/response shape.</p>
+<p><strong>Limitation:</strong> Doesn't work for nested objects (the regex stops at the first <code>}</code>).</p>
+
+<h3>Technique 3: Identifier Frequency Analysis</h3>
+<pre><code><span class="comment"># Find minified names related to a concept</span>
+<span class="cmd">strings binary | grep -oE '[A-Za-z_][A-Za-z0-9_]*Refresh[A-Za-z0-9_]*' | sort | uniq -c | sort -rn</span></code></pre>
+<p><strong>When to use:</strong> To get an overview of how a concept (auth, refresh, token) is used across the codebase. High-frequency names are usually important.</p>
+
+<h3>Technique 4: Contextual Sibling Search</h3>
+<pre><code><span class="comment"># Find what's defined near a known string</span>
+<span class="cmd">strings binary | grep -B2 -A2 "known_string"</span></code></pre>
+<p><strong>When to use:</strong> When you've found one piece (e.g., the API version string) and want to find related values defined nearby (e.g., the beta header).</p>
+<p><strong>Caveat:</strong> <code>strings</code> output lines don't correspond to source code lines. Long minified JS might be one enormous string that spans one "line." Use <code>-o</code> (only matching) to manage output size.</p>
+
+<h3>Technique 5: Export/Module Boundary Analysis</h3>
+<pre><code><span class="comment"># Find exported names (these retain semantic meaning)</span>
+<span class="cmd">strings binary | grep -oE '[A-Z_]{2,}:' | sort | uniq -c | sort -rn | head -20</span></code></pre>
+<p><strong>When to use:</strong> Module export names (like <code>CLAUDE_AI_INFERENCE_SCOPE</code>) are preserved because they're part of the public API between modules. They give you semantic context for the minified variable names they reference.</p>
+
+<h3>Technique 6: Negative Filtering</h3>
+<pre><code><span class="comment"># Filter OUT known noise sources</span>
+<span class="cmd">strings binary | grep "pattern" | grep -iv "azure\|aws\|google\|msal\|microsoft\|github\|notion"</span></code></pre>
+<p><strong>When to use:</strong> Always. Bundled SDKs are the #1 source of noise. Build up a negative filter as you encounter junk libraries. The negative filters I used progressively in this project:</p>
+<ol>
+  <li><code>azure</code> — Azure Identity SDK (massive)</li>
+  <li><code>aws</code> — AWS SDK</li>
+  <li><code>google</code> — Google auth libraries</li>
+  <li><code>msal</code> — Microsoft Authentication Library</li>
+  <li><code>github</code> — GitHub links in comments</li>
+  <li><code>notion</code> — Notion MCP integration</li>
+</ol>
+
+<h3>Technique 7: UUID/Key Extraction</h3>
+<pre><code><span class="comment"># Find UUID-shaped strings (potential client_ids, API keys)</span>
+<span class="cmd">strings binary | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | sort | uniq -c | sort -rn</span></code></pre>
+<p><strong>When to use:</strong> When you need to find client IDs, tenant IDs, or other identifiers. Cross-reference with known values from other discoveries.</p>
+
+<div class="callout callout-success">
+  <strong>The Meta-Technique: Iterative Refinement</strong>
+  <p>Binary analysis is never one search. It's a loop:</p>
+  <ol>
+    <li>Search for something you know (a URL, an error message)</li>
+    <li>Find nearby unknowns (minified variable names)</li>
+    <li>Search for those unknowns to find their definitions</li>
+    <li>Those definitions reveal new knowns → go to step 1</li>
+  </ol>
+  <p>Each iteration expands your understanding. The error message "OAuth authentication is currently not supported" → led to searching for "oauth" strings → found <code>CH9</code> → found its value → found <code>bH9</code> next to it → led to searching for <code>VW8</code> → found the entire config → which contained <code>TOKEN_URL</code> and <code>CLIENT_ID</code>.</p>
+</div>
+
+</div><!-- /container -->
+
+<footer style="text-align:center; padding:40px; color:var(--text-dim); border-top:1px solid var(--border); margin-top:40px;">
+  <p><a href="claude_oauth_guide.html">&larr; Back to main OAuth guide</a></p>
+  <p style="margin-top:8px">Reverse-engineered on March 28, 2026 &middot; Claude Code v2.1.87 &middot; macOS</p>
+</footer>
+
+</body>
+</html>

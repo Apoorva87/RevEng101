@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex Usage Reverse Engineering</title>
+  <style>
+    :root {
+      --bg: #f5f0e8;
+      --panel: #fffaf3;
+      --ink: #1d1a17;
+      --muted: #6a6258;
+      --accent: #0f766e;
+      --accent-soft: #d7f1ee;
+      --line: #d7ccb9;
+      --warm: #a16207;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", serif;
+      background:
+        radial-gradient(circle at top left, #fff7df 0, transparent 35%),
+        linear-gradient(180deg, #efe6d6 0%, var(--bg) 50%, #f7f2ea 100%);
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 20px 72px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.14), rgba(161, 98, 7, 0.12));
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 18px 50px rgba(29, 26, 23, 0.08);
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      margin: 0 0 12px;
+    }
+
+    h1 { font-size: clamp(2rem, 5vw, 3.6rem); }
+    h2 { font-size: 1.65rem; margin-top: 36px; }
+    h3 { font-size: 1.15rem; margin-top: 22px; }
+
+    p, li { font-size: 1.03rem; }
+
+    .subtitle {
+      color: var(--muted);
+      max-width: 52rem;
+      margin-top: 10px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(29, 26, 23, 0.05);
+    }
+
+    .eyebrow {
+      font-family: "Menlo", "SFMono-Regular", monospace;
+      color: var(--accent);
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", Menlo, monospace;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: #1f2937;
+      color: #f8fafc;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .steps {
+      counter-reset: step;
+      list-style: none;
+      padding: 0;
+      margin: 20px 0 0;
+    }
+
+    .steps li {
+      counter-increment: step;
+      margin: 0 0 16px;
+      padding: 16px 16px 16px 54px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      position: relative;
+    }
+
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 14px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+    }
+
+    .note {
+      border-left: 4px solid var(--warm);
+      padding: 12px 16px;
+      background: #fff6df;
+      border-radius: 12px;
+      margin-top: 18px;
+    }
+
+    .footer {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Codex Reverse Engineering</div>
+      <h1>How We Figured Out the Codex Usage Dashboard</h1>
+      <p class="subtitle">
+        This page captures the reasoning behind <code>codex_nerve.py</code>: where the account credentials come from,
+        which endpoint exposes usage windows, which headers matter, and why local session counting is only an optional supplement.
+      </p>
+      <p class="subtitle"><a href="codex_auth_guide.html">Open the full Codex auth deep dive</a></p>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="eyebrow">Inputs</div>
+        <h3>What We Already Had</h3>
+        <p>The local Codex CLI stores authentication metadata in <code>~/.codex/auth.json</code> and session transcripts in <code>~/.codex/sessions</code>.</p>
+      </article>
+      <article class="card">
+        <div class="eyebrow">Goal</div>
+        <h3>What We Wanted</h3>
+        <p>A lightweight terminal view of account usage: 5-hour and weekly utilization, reset countdowns, plan information, and a rough local session count.</p>
+      </article>
+      <article class="card">
+        <div class="eyebrow">Output</div>
+        <h3>What We Built</h3>
+        <p><code>codex_nerve.py</code> polls the usage endpoint, draws a curses dashboard, and optionally scans local session files for recent activity.</p>
+      </article>
+      <article class="card">
+        <div class="eyebrow">Refresh</div>
+        <h3>How Tokens Stay Current</h3>
+        <p><code>~/.codex/auth.json</code> includes both an <code>access_token</code> and a <code>refresh_token</code>, so a stale copied token can be recovered without logging in again.</p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Discovery Path</h2>
+      <ol class="steps">
+        <li>
+          <strong>Start from a working Codex installation.</strong>
+          If Codex already works on the machine, the safest path is to reuse the locally stored auth context rather than trying to manually reconstruct credentials.
+        </li>
+        <li>
+          <strong>Extract the account-scoped identifiers.</strong>
+          The two critical values are the bearer token and the ChatGPT account id, both available in <code>~/.codex/auth.json</code>.
+        </li>
+        <li>
+          <strong>Replicate the account usage request.</strong>
+          The dashboard calls <code>https://chatgpt.com/backend-api/wham/usage</code> with the same two headers the CLI uses for account-level views.
+        </li>
+        <li>
+          <strong>Treat session counts as a local hint, not an API truth.</strong>
+          The usage payload exposes limit windows and plan state, but not a canonical account-wide “session count,” so <code>~/.codex/sessions</code> is scanned separately.
+        </li>
+      </ol>
+    </section>
+
+    <section class="panel">
+      <h2>The Minimal Request Shape</h2>
+      <p>The dashboard’s network layer is intentionally small. The essential request is:</p>
+<pre><code>GET https://chatgpt.com/backend-api/wham/usage
+Authorization: Bearer &lt;access_token&gt;
+ChatGPT-Account-Id: &lt;account_id&gt;
+Accept: application/json</code></pre>
+      <p>
+        That response provides the usage windows used by the TUI, including primary and secondary rate-limit windows,
+        reset times, plan metadata, and code-review window information.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>How We Inferred the Refresh Flow</h2>
+      <p>
+        The installed Codex binary contains clear OAuth strings for token recovery, including
+        <code>refresh_token</code>, <code>grant_type</code>, <code>application/x-www-form-urlencoded</code>,
+        the ChatGPT client id <code>app_EMoamEEZ73f0CkXaXp7hrann</code>, and log messages like
+        “Access token expired, refreshing.”
+      </p>
+      <p>
+        Separately, the local token claims show <code>iss=https://auth.openai.com</code> and the
+        <code>offline_access</code> scope, which strongly suggests standard OAuth refresh semantics.
+        I verified the token endpoint from the OpenAI OIDC discovery document:
+        <code>https://auth0.openai.com/oauth/token</code>.
+      </p>
+<pre><code>POST https://auth0.openai.com/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+refresh_token=&lt;refresh_token from ~/.codex/auth.json&gt;
+client_id=app_EMoamEEZ73f0CkXaXp7hrann</code></pre>
+      <div class="note">
+        The dashboard uses this flow only as a recovery step after an auth failure. The standalone helper script
+        <code>codex_refresh_auth.py</code> lets you inspect or run the same refresh explicitly.
+      </div>
+      <p><a href="codex_auth_guide.html">Read the step-by-step auth investigation</a></p>
+    </section>
+
+    <section class="panel">
+      <h2>Why Local Session Counting Is Separate</h2>
+      <p>
+        The dashboard scans <code>*.jsonl</code> files under a configured <code>sessions_dir</code> and groups them into “last 5 hours,”
+        “last 7 days,” and “all time.” This is helpful for local machine awareness, but it is not the same thing as server-side account usage.
+      </p>
+      <div class="note">
+        A local sessions directory can be missing, incomplete, or tied to just one machine. The API data is the source of truth for rate limits; the session scan is supplemental.
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Bootstrapping the Config Safely</h2>
+      <p>
+        The helper script writes credentials into <code>Codex/.local/accounts.ini</code>, which is gitignored.
+        That keeps the live token file out of normal source control while still giving the dashboard a stable default path.
+      </p>
+<pre><code>./Codex/codex_bootstrap_accounts.sh
+python3 Codex/codex_refresh_auth.py --print-only
+python3 Codex/codex_nerve.py</code></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Project Links</h2>
+      <ul>
+        <li><a href="README.md">Codex docs README</a></li>
+        <li><a href="codex_auth_guide.html">Open the full auth guide</a></li>
+        <li><a href="../codex_nerve.py">Open codex_nerve.py</a></li>
+        <li><a href="../codex_refresh_auth.py">Open codex_refresh_auth.py</a></li>
+        <li><a href="../codex_bootstrap_accounts.sh">Open codex_bootstrap_accounts.sh</a></li>
+      </ul>
+    </section>
+
+    <p class="footer">This guide documents the reasoning and the request shape, but it intentionally does not embed live credentials.</p>
+  </div>
+</body>
+</html>

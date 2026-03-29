@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reverse-Engineering Claude Code's OAuth &amp; Usage API</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    padding: 60px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.4em;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 1.15em;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+  h2 {
+    font-size: 1.6em;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1.2em;
+    margin: 28px 0 12px;
+    color: var(--purple);
+  }
+  p, li { color: var(--text); margin-bottom: 10px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.88em;
+    line-height: 1.55;
+    margin: 12px 0 20px;
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.92em;
+  }
+  :not(pre) > code {
+    background: var(--surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--orange);
+  }
+  .cmd { color: var(--green); }
+  .comment { color: var(--text-dim); font-style: italic; }
+  .output { color: var(--text-dim); }
+  .highlight { color: var(--yellow); font-weight: bold; }
+
+  /* Collapsible sections */
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  details[open] { border-color: var(--accent); }
+  summary {
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+  }
+  summary:hover { background: var(--surface2); }
+  summary::marker { content: ''; }
+  summary::before {
+    content: '▶';
+    font-size: 0.7em;
+    transition: transform 0.2s;
+    display: inline-block;
+    width: 16px;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > .content { padding: 0 18px 18px; }
+
+  /* Step badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+  }
+  .badge-success { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .badge-fail { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-info { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .badge-key { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+
+  /* Diagram containers */
+  .diagram-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    margin: 24px 0;
+    text-align: center;
+    overflow-x: auto;
+  }
+  .diagram-container svg { max-width: 100%; }
+
+  /* Flow diagram with CSS */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    margin: 24px 0;
+  }
+  .flow-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.85em;
+    text-align: center;
+    min-width: 120px;
+  }
+  .flow-arrow {
+    color: var(--accent);
+    font-size: 1.4em;
+    font-weight: bold;
+  }
+
+  /* Sequence diagram */
+  .seq-diagram {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.82em;
+    text-align: left;
+    display: inline-block;
+    line-height: 1.6;
+    white-space: pre;
+    color: var(--text);
+  }
+  .seq-actor { color: var(--accent); font-weight: bold; }
+  .seq-arrow { color: var(--green); }
+  .seq-note { color: var(--yellow); }
+  .seq-fail { color: var(--red); }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th { background: var(--surface); color: var(--accent); }
+  tr:nth-child(even) { background: var(--surface); }
+
+  /* Callout boxes */
+  .callout {
+    border-left: 4px solid;
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+  .callout-success { border-color: var(--green); background: rgba(63,185,80,0.08); }
+  .callout-warning { border-color: var(--yellow); background: rgba(210,153,34,0.08); }
+  .callout-danger  { border-color: var(--red); background: rgba(248,81,73,0.08); }
+  .callout-info    { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+  .callout strong  { display: block; margin-bottom: 4px; }
+
+  /* Animated token flow */
+  @keyframes flowPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+  .pulse { animation: flowPulse 2s ease-in-out infinite; }
+  .pulse-delay-1 { animation-delay: 0.3s; }
+  .pulse-delay-2 { animation-delay: 0.6s; }
+  .pulse-delay-3 { animation-delay: 0.9s; }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    padding-left: 32px;
+    margin: 24px 0;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 8px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--bg);
+  }
+  .timeline-item.success::before { border-color: var(--green); background: var(--green); }
+  .timeline-item.fail::before { border-color: var(--red); background: var(--red); }
+  .timeline-item.key::before { border-color: var(--purple); background: var(--purple); }
+
+  /* TOC */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin: 24px 0;
+  }
+  .toc h3 { margin-top: 0; color: var(--text); }
+  .toc ol { margin-bottom: 0; }
+  .toc li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Reverse-Engineering Claude Code's OAuth &amp; Usage API</h1>
+  <p class="subtitle">A complete guide to discovering how Claude Code authenticates with Anthropic's API, reads rate-limit usage, and refreshes OAuth tokens — all from first principles.</p>
+  <p class="subtitle"><a href="binary_analysis_guide.html">Open the binary analysis deep dive</a></p>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════ TOC ═══════════════════════════════════════════ -->
+<div class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#goal">What We Were Trying to Do</a></li>
+    <li><a href="#arch">Architecture Overview</a></li>
+    <li><a href="#phase1">Phase 1 — Finding the Credentials</a></li>
+    <li><a href="#phase2">Phase 2 — Finding the Right API Endpoint</a></li>
+    <li><a href="#phase3">Phase 3 — The Breakthrough: Beta Headers</a></li>
+    <li><a href="#phase4">Phase 4 — Understanding the Rate Limit Headers</a></li>
+    <li><a href="#phase5">Phase 5 — Reverse-Engineering Token Refresh</a></li>
+    <li><a href="#final-script">The Final Script</a></li>
+    <li><a href="#key-findings">Key Findings Summary</a></li>
+  </ol>
+  <p><a href="binary_analysis_guide.html">Companion doc: Binary Analysis Deep Dive</a></p>
+</div>
+
+<!-- ═══════════════════════════════════════════ GOAL ═══════════════════════════════════════════ -->
+<h2 id="goal">1. What We Were Trying to Do</h2>
+
+<p>Claude Code (Anthropic's CLI tool) shows a <strong>usage status line</strong> that tells you how much of your Claude Pro/Max rate limit you've consumed — things like "resets at 9pm" or utilization percentages. The goal was to:</p>
+
+<ol>
+  <li><strong>Discover</strong> how Claude Code gets this usage data</li>
+  <li><strong>Replicate</strong> it as a standalone <code>curl</code> command</li>
+  <li><strong>Handle token refresh</strong> so the script works even when the OAuth token expires</li>
+</ol>
+
+<div class="callout callout-info">
+  <strong>Why is this non-trivial?</strong>
+  Claude Pro/Max users don't have an API key (<code>ANTHROPIC_API_KEY</code>). They authenticate via OAuth through Claude.ai. The OAuth flow, endpoints, and required headers are not publicly documented.
+</div>
+
+<!-- ═══════════════════════════════════════════ ARCH ═══════════════════════════════════════════ -->
+<h2 id="arch">2. Architecture Overview</h2>
+
+<p>Before diving into the commands, here's how the pieces fit together:</p>
+
+<div class="diagram-container">
+<pre class="seq-diagram">
+<span class="seq-actor">┌──────────────┐</span>      <span class="seq-actor">┌───────────────────┐</span>      <span class="seq-actor">┌──────────────────────┐</span>
+<span class="seq-actor">│  Claude Code  │</span>      <span class="seq-actor">│  macOS Keychain     │</span>      <span class="seq-actor">│  api.anthropic.com   │</span>
+<span class="seq-actor">└──────┬───────┘</span>      <span class="seq-actor">└─────────┬───────────┘</span>      <span class="seq-actor">└──────────┬───────────┘</span>
+       │                          │                             │
+       │  <span class="seq-arrow">──── store tokens ────▶</span> │                             │
+       │                          │                             │
+       │  <span class="seq-arrow">◀── read tokens ──────</span> │                             │
+       │                          │                             │
+       │  <span class="seq-note">POST /v1/messages</span>                                     │
+       │  <span class="seq-note">Authorization: Bearer {token}</span>                          │
+       │  <span class="seq-note">anthropic-beta: oauth-2025-04-20</span>    ← <span class="highlight">THE SECRET SAUCE</span>  │
+       │  <span class="seq-arrow">─────────────────────────────────────────────────────▶</span> │
+       │                                                        │
+       │  <span class="seq-arrow">◀────────────── response headers ───────────────────</span> │
+       │  <span class="seq-note">anthropic-ratelimit-unified-5h-utilization: 0.30</span>      │
+       │  <span class="seq-note">anthropic-ratelimit-unified-7d-utilization: 0.72</span>      │
+       │                                                        │
+       │                                                        │
+       │  <span class="seq-note">[if token expired]</span>                                     │
+       │                          │                             │
+       │  <span class="seq-actor">┌─────────────────────────┐</span>                         │
+       │  <span class="seq-actor">│ platform.claude.com     │</span>                         │
+       │  <span class="seq-actor">└────────────┬────────────┘</span>                         │
+       │               │                                        │
+       │  <span class="seq-note">POST /v1/oauth/token</span>                                   │
+       │  <span class="seq-note">grant_type=refresh_token</span>                               │
+       │  <span class="seq-arrow">──────────────▶</span> │                                     │
+       │  <span class="seq-arrow">◀──────────────</span> │ <span class="seq-note">{access_token, refresh_token}</span>     │
+       │               │                                        │
+</pre>
+</div>
+
+<div class="callout callout-warning">
+  <strong>Two different hosts!</strong>
+  API calls go to <code>api.anthropic.com</code>, but token refresh goes to <code>platform.claude.com</code>. This is a common pattern (separate auth server from resource server) but easy to miss.
+</div>
+
+<!-- ═══════════════════════════════════════════ PHASE 1 ═══════════════════════════════════════ -->
+<h2 id="phase1">3. Phase 1 — Finding the Credentials</h2>
+
+<h3>Step 1.1: Check for environment variables <span class="badge badge-fail">Dead End</span></h3>
+<p>First, we checked if there was an API key set:</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ if [ -n "$ANTHROPIC_API_KEY" ]; then echo "SET"; else echo "NOT SET"; fi</span>
+<span class="output">NOT SET</span></code></pre>
+    <p>As expected — Claude Pro users authenticate via OAuth, not API keys.</p>
+  </div>
+</details>
+
+<h3>Step 1.2: Search the Claude config directory <span class="badge badge-info">Reconnaissance</span></h3>
+<p>Explored <code>~/.claude/</code> for auth-related files:</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ ls -la ~/.claude/</span>
+<span class="output">drwxr-xr-x  23 your-user  staff     736 Mar 28 21:50 .
+...
+-rw-------   1 your-user  staff    2361 Mar 22 18:48 stats-cache.json
+-rw-r--r--   1 your-user  staff     633 Mar 17 14:40 statusline-command.sh
+...</span>
+
+<span class="comment"># Also tried globbing for auth/token/oauth files</span>
+<span class="cmd">$ ls ~/.claude/**/*auth* ~/.claude/**/*token* ~/.claude/**/*oauth*</span>
+<span class="output">No files found</span></code></pre>
+    <p>No credential files on disk — the tokens must be stored more securely.</p>
+  </div>
+</details>
+
+<h3>Step 1.3: Check the macOS Keychain <span class="badge badge-success">Found It!</span></h3>
+<p>macOS apps commonly store secrets in the system Keychain:</p>
+
+<details open>
+  <summary>Command &amp; Output — <strong>Key Discovery</strong></summary>
+  <div class="content">
+<pre><code><span class="cmd">$ security dump-keychain 2>/dev/null | grep -i -A3 "claude"</span>
+<span class="output">    0x00000007 &lt;blob&gt;=<span class="highlight">"Claude Code-credentials"</span>
+    0x00000008 &lt;blob&gt;=&lt;NULL&gt;
+    "acct"&lt;blob&gt;="$(whoami)"
+    "svce"&lt;blob&gt;="Claude Code-credentials"</span></code></pre>
+
+<pre><code><span class="comment"># Extract and examine the structure (values truncated for security)</span>
+<span class="cmd">$ security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w \
+  | python3 -c "import sys,json; ..." </span>
+<span class="output">claudeAiOauth:
+  accessToken: sk-ant-oat01-xcnB-Zh... (len=108)
+  refreshToken: sk-ant-ort01-_vV1PXO... (len=108)
+  expiresAt: 1774772239299
+  subscriptionType: pro
+  rateLimitTier: default_claude_ai</span></code></pre>
+  </div>
+</details>
+
+<div class="callout callout-success">
+  <strong>Key Finding #1</strong>
+  Claude Code stores OAuth credentials as a JSON blob in the macOS Keychain under the service name <code>"Claude Code-credentials"</code> with the username as the account. The JSON contains: <code>accessToken</code>, <code>refreshToken</code>, <code>expiresAt</code>, <code>subscriptionType</code>, and <code>rateLimitTier</code>.
+</div>
+
+<!-- ═══════════════════════════════════════════ PHASE 2 ═══════════════════════════════════════ -->
+<h2 id="phase2">4. Phase 2 — Finding the Right API Endpoint</h2>
+
+<h3>Step 2.1: Try the public API with Bearer token <span class="badge badge-fail">401 — OAuth Not Supported</span></h3>
+<p>The obvious first attempt — use the token with the standard Messages API:</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ curl -s -i https://api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,
+       "messages":[{"role":"user","content":"hi"}]}'</span>
+
+<span class="output">HTTP/2 <span class="highlight" style="color:var(--red)">401</span>
+...
+<span style="color:var(--red)">{"type":"error","error":{"type":"authentication_error",
+ "message":"OAuth authentication is currently not supported."}}</span></span></code></pre>
+    <p><strong>Lesson:</strong> The standard API endpoint doesn't accept OAuth tokens by default. There must be a special header or a different endpoint.</p>
+  </div>
+</details>
+
+<h3>Step 2.2: Try alternative hostnames <span class="badge badge-fail">All Failed</span></h3>
+<p>Maybe Claude Code uses a different host entirely?</p>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ for host in "api.claude.ai" "claude.ai/api" "app.claude.ai/api"; do
+    echo "=== Trying $host ==="
+    curl -s -o /dev/null -w "HTTP %{http_code}\n" "https://$host/v1/messages" ...
+  done</span>
+
+<span class="output">=== Trying api.claude.ai ===
+HTTP <span style="color:var(--red)">000</span> (connection failed — host doesn't exist)
+=== Trying claude.ai/api ===
+HTTP <span style="color:var(--red)">403</span>
+=== Trying app.claude.ai/api ===
+HTTP <span style="color:var(--red)">000</span> (connection failed)</span></code></pre>
+    <p>None of these alternative hosts worked. The endpoint must be <code>api.anthropic.com</code> after all — but with something extra.</p>
+  </div>
+</details>
+
+<h3>Step 2.3: Examine the Claude Code binary <span class="badge badge-key">Critical Discovery</span></h3>
+<p>Since Claude Code is a compiled binary, we used <code>strings</code> to extract readable text and find API-related patterns:</p>
+
+<details open>
+  <summary>Command &amp; Output — <strong>Finding the Beta Header</strong></summary>
+  <div class="content">
+<pre><code><span class="comment"># First, locate the binary</span>
+<span class="cmd">$ readlink -f $(which claude)</span>
+<span class="output">~/.local/share/claude/versions/2.1.87</span>
+
+<span class="cmd">$ file ~/.local/share/claude/versions/2.1.87</span>
+<span class="output">Mach-O 64-bit executable arm64</span>
+
+<span class="comment"># Extract beta header strings</span>
+<span class="cmd">$ strings ~/.local/share/claude/versions/2.1.87 \
+  | grep "anthropic-beta\|CH9\|bV9"</span>
+<span class="output">...
+CH9="<span class="highlight">files-api-2025-04-14,oauth-2025-04-20</span>",bH9="2023-06-01"
+...</span></code></pre>
+    <p>The variable <code>CH9</code> is the beta features string and <code>bH9</code> is the API version. The key is the <strong><code>oauth-2025-04-20</code></strong> beta flag!</p>
+  </div>
+</details>
+
+<div class="callout callout-success">
+  <strong>Key Finding #2</strong>
+  The API endpoint is the standard <code>https://api.anthropic.com/v1/messages</code>, but Claude Code sends an extra header:
+  <code>anthropic-beta: oauth-2025-04-20</code>. This beta flag enables OAuth Bearer token authentication on the Messages API.
+</div>
+
+<!-- ═══════════════════════════════════════════ PHASE 3 ═══════════════════════════════════════ -->
+<h2 id="phase3">5. Phase 3 — The Breakthrough</h2>
+
+<h3>Step 3.1: API call with the beta header <span class="badge badge-success">200 OK!</span></h3>
+
+<details open>
+  <summary>Command &amp; Output — <strong>Success!</strong></summary>
+  <div class="content">
+<pre><code><span class="cmd">$ curl -s -i https://api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "<span class="highlight">anthropic-beta: files-api-2025-04-14,oauth-2025-04-20</span>" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,
+       "messages":[{"role":"user","content":"hi"}]}'</span>
+
+<span class="output">HTTP/2 <span style="color:var(--green)">200</span>
+date: Sun, 29 Mar 2026 05:09:41 GMT
+content-type: application/json
+<span class="highlight">anthropic-ratelimit-unified-status: allowed</span>
+<span class="highlight">anthropic-ratelimit-unified-5h-status: allowed</span>
+<span class="highlight">anthropic-ratelimit-unified-5h-reset: 1774774800</span>
+<span class="highlight">anthropic-ratelimit-unified-5h-utilization: 0.25</span>
+<span class="highlight">anthropic-ratelimit-unified-7d-status: allowed</span>
+<span class="highlight">anthropic-ratelimit-unified-7d-reset: 1774983600</span>
+<span class="highlight">anthropic-ratelimit-unified-7d-utilization: 0.71</span>
+anthropic-ratelimit-unified-representative-claim: five_hour
+anthropic-ratelimit-unified-fallback-percentage: 0.5
+anthropic-ratelimit-unified-reset: 1774774800
+anthropic-ratelimit-unified-overage-disabled-reason: org_level_disabled_until
+anthropic-ratelimit-unified-overage-status: rejected
+
+{"model":"claude-haiku-4-5-20251001","id":"msg_01Rwc4a96Tewfp6VBAjzS6rz",
+ "type":"message","role":"assistant",
+ "content":[{"type":"text","text":"#"}],
+ "stop_reason":"max_tokens",
+ "usage":{"input_tokens":8,"output_tokens":1,
+  "service_tier":"standard"}}</span></code></pre>
+  </div>
+</details>
+
+<p>The response headers contain the <strong>unified rate limit</strong> data — exactly what Claude Code displays in the status line.</p>
+
+<!-- ═══════════════════════════════════════════ PHASE 4 ═══════════════════════════════════════ -->
+<h2 id="phase4">6. Phase 4 — Understanding the Rate Limit Headers</h2>
+
+<p>The <code>anthropic-ratelimit-unified-*</code> headers are specific to Claude Pro/Max subscriptions. They're completely different from the per-minute <code>anthropic-ratelimit-requests-*</code> headers that API key users see.</p>
+
+<table>
+  <thead>
+    <tr><th>Header</th><th>Type</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>unified-status</code></td><td>string</td><td><code>allowed</code> or <code>limited</code> — overall status</td></tr>
+    <tr><td><code>unified-5h-status</code></td><td>string</td><td>Status of the 5-hour rolling window</td></tr>
+    <tr><td><code>unified-5h-utilization</code></td><td>float</td><td>0.0–1.0 — fraction of 5h budget consumed</td></tr>
+    <tr><td><code>unified-5h-reset</code></td><td>epoch</td><td>Unix timestamp when 5h window resets</td></tr>
+    <tr><td><code>unified-7d-status</code></td><td>string</td><td>Status of the 7-day rolling window</td></tr>
+    <tr><td><code>unified-7d-utilization</code></td><td>float</td><td>0.0–1.0 — fraction of 7d budget consumed</td></tr>
+    <tr><td><code>unified-7d-reset</code></td><td>epoch</td><td>Unix timestamp when 7d window resets</td></tr>
+    <tr><td><code>unified-representative-claim</code></td><td>string</td><td>Which window is the current bottleneck (<code>five_hour</code> or <code>seven_day</code>)</td></tr>
+    <tr><td><code>unified-fallback-percentage</code></td><td>float</td><td>Capacity available when one window is exhausted</td></tr>
+    <tr><td><code>unified-overage-status</code></td><td>string</td><td><code>rejected</code> (Pro) or <code>allowed</code> (Max can go over)</td></tr>
+    <tr><td><code>unified-overage-disabled-reason</code></td><td>string</td><td>Why overage is disabled</td></tr>
+  </tbody>
+</table>
+
+<div class="diagram-container">
+  <h3 style="margin-bottom:16px; color:var(--text)">Two Rolling Windows</h3>
+  <svg width="600" height="200" viewBox="0 0 600 200">
+    <!-- 5-hour bar -->
+    <text x="20" y="40" fill="#8b949e" font-size="14" font-family="sans-serif">5-Hour Window</text>
+    <rect x="150" y="25" width="400" height="24" rx="4" fill="#1c2333" stroke="#30363d"/>
+    <rect x="150" y="25" width="120" height="24" rx="4" fill="#3fb950" opacity="0.8">
+      <animate attributeName="width" from="0" to="120" dur="1.5s" fill="freeze"/>
+    </rect>
+    <text x="160" y="42" fill="white" font-size="12" font-family="monospace" font-weight="bold">30% used</text>
+    <text x="445" y="42" fill="#8b949e" font-size="11" font-family="monospace">resets in ~3h</text>
+
+    <!-- 7-day bar -->
+    <text x="20" y="100" fill="#8b949e" font-size="14" font-family="sans-serif">7-Day Window</text>
+    <rect x="150" y="85" width="400" height="24" rx="4" fill="#1c2333" stroke="#30363d"/>
+    <rect x="150" y="85" width="280" height="24" rx="4" fill="#d29922" opacity="0.8">
+      <animate attributeName="width" from="0" to="280" dur="1.5s" fill="freeze"/>
+    </rect>
+    <text x="160" y="102" fill="white" font-size="12" font-family="monospace" font-weight="bold">70% used</text>
+    <text x="440" y="102" fill="#8b949e" font-size="11" font-family="monospace">resets Mar 31</text>
+
+    <!-- Annotations -->
+    <line x1="150" y1="130" x2="550" y2="130" stroke="#30363d" stroke-dasharray="4"/>
+    <text x="20" y="155" fill="#bc8cff" font-size="12" font-family="sans-serif">Binding constraint:</text>
+    <text x="150" y="155" fill="#58a6ff" font-size="12" font-family="monospace">representative-claim = five_hour</text>
+    <text x="20" y="180" fill="#bc8cff" font-size="12" font-family="sans-serif">When exhausted:</text>
+    <text x="150" y="180" fill="#58a6ff" font-size="12" font-family="monospace">fallback = 50% capacity (Pro), overage = rejected</text>
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════ PHASE 5 ═══════════════════════════════════════ -->
+<h2 id="phase5">7. Phase 5 — Reverse-Engineering Token Refresh</h2>
+
+<p>OAuth access tokens expire. We needed to find how Claude Code refreshes them. This required deeper binary analysis.</p>
+
+<h3>Step 5.1: Search for refresh patterns in the binary <span class="badge badge-info">Reconnaissance</span></h3>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="comment"># Find refresh-related identifiers</span>
+<span class="cmd">$ strings /path/to/claude | grep -oE '[a-zA-Z_]*[Rr]efresh[a-zA-Z_]*' \
+  | sort | uniq -c | sort -rn | head -10</span>
+<span class="output"> 386 refresh
+ 164 refreshToken
+ 156 refresh_token
+  48 refreshed
+  48 forceRefresh
+  33 refreshAccessTokenAsync
+  ...</span></code></pre>
+    <p>Hundreds of refresh references — many from bundled Azure/AWS SDKs. We need to narrow down to Anthropic-specific code.</p>
+  </div>
+</details>
+
+<h3>Step 5.2: Find the exact request format <span class="badge badge-key">Critical Discovery</span></h3>
+
+<details open>
+  <summary>Command &amp; Output — <strong>The Refresh Request Shape</strong></summary>
+  <div class="content">
+<pre><code><span class="cmd">$ strings /path/to/claude \
+  | grep -oE '\{[^}]*refresh_token[^}]*\}' \
+  | grep -v azure -i</span>
+
+<span class="output"><span class="highlight">{let q={grant_type:"refresh_token",refresh_token:H,
+  client_id:m8().CLIENT_ID,
+  scope:((_?.length)?_:eK_).join(" ")}</span>
+
+{access_token:O,refresh_token:T=H,expires_in:z}
+...</span></code></pre>
+    <p>This reveals the exact request shape: <code>grant_type</code>, <code>refresh_token</code>, <code>client_id</code>, and <code>scope</code>.</p>
+  </div>
+</details>
+
+<h3>Step 5.3: Find CLIENT_ID and TOKEN_URL <span class="badge badge-key">Critical Discovery</span></h3>
+
+<details open>
+  <summary>Command &amp; Output — <strong>The Full OAuth Config</strong></summary>
+  <div class="content">
+<pre><code><span class="cmd">$ strings /path/to/claude | grep "eK_\|VW8" | head -5</span>
+
+<span class="output">eK_=[A1H,_S,
+  "user:sessions:claude_code",
+  "user:mcp_servers",
+  "user:file_upload"],
+
+VW8={
+  BASE_API_URL:"https://api.anthropic.com",
+  <span class="highlight">TOKEN_URL:"https://platform.claude.com/v1/oauth/token"</span>,
+  <span class="highlight">CLIENT_ID:"9d1c250a-e61b-44d9-88ed-5944d1962f5e"</span>,
+  CLAUDE_AI_AUTHORIZE_URL:"https://claude.com/cai/oauth/authorize",
+  ...
+}</span></code></pre>
+  </div>
+</details>
+
+<div class="callout callout-success">
+  <strong>Key Finding #3 — Token Refresh Endpoint</strong>
+  <table style="margin-top:8px">
+    <tr><td><strong>URL</strong></td><td><code>https://platform.claude.com/v1/oauth/token</code></td></tr>
+    <tr><td><strong>Method</strong></td><td>POST</td></tr>
+    <tr><td><strong>Content-Type</strong></td><td><code>application/x-www-form-urlencoded</code></td></tr>
+    <tr><td><strong>client_id</strong></td><td><code>9d1c250a-e61b-44d9-88ed-5944d1962f5e</code></td></tr>
+    <tr><td><strong>Scopes</strong></td><td><code>user:inference user:inference:claude_code user:sessions:claude_code user:mcp_servers user:file_upload</code></td></tr>
+  </table>
+</div>
+
+<h3>Step 5.4: Test the refresh endpoint <span class="badge badge-success">Confirmed (429)</span></h3>
+
+<details>
+  <summary>Command &amp; Output</summary>
+  <div class="content">
+<pre><code><span class="cmd">$ curl -s -i https://platform.claude.com/v1/oauth/token \
+  -H "content-type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token\
+&amp;refresh_token=$REFRESH_TOKEN\
+&amp;client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e\
+&amp;scope=user:inference%20user:inference:claude_code%20..."</span>
+
+<span class="output">HTTP/2 <span style="color:var(--yellow)">429</span>
+{
+  "error": {
+    "type": "rate_limit_error",
+    "message": "Rate limited. Please try again later."
+  }
+}</span></code></pre>
+    <p>A <code>429</code> (not <code>400</code> or <code>404</code>) confirms the endpoint, format, and credentials are all correct. It's rate-limited because the token was recently refreshed by Claude Code itself.</p>
+  </div>
+</details>
+
+<h3>Failed Attempts Along the Way</h3>
+
+<details>
+  <summary>Attempts that didn't work <span class="badge badge-fail">For Learning</span></summary>
+  <div class="content">
+    <h4>Attempt A: JSON body to <code>/v1/oauth/token</code></h4>
+<pre><code><span class="cmd">$ curl -s https://api.anthropic.com/v1/oauth/token \
+  -H "content-type: application/json" \
+  -d '{"grant_type":"refresh_token","refresh_token":"..."}'</span>
+<span class="output" style="color:var(--red)">{"error":{"type":"invalid_request_error","message":"Invalid request format"}}</span></code></pre>
+    <p><strong>Why it failed:</strong> Wrong Content-Type (JSON vs form-encoded) and wrong host (<code>api.anthropic.com</code> vs <code>platform.claude.com</code>).</p>
+
+    <h4>Attempt B: Form-encoded to <code>api.anthropic.com</code></h4>
+<pre><code><span class="cmd">$ curl -s https://api.anthropic.com/v1/oauth/token \
+  -H "content-type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token&amp;refresh_token=..."</span>
+<span class="output" style="color:var(--red)">{"error":{"type":"invalid_request_error","message":"Invalid request format"}}</span></code></pre>
+    <p><strong>Why it failed:</strong> Right format, but wrong host. The token endpoint is on <code>platform.claude.com</code>, not <code>api.anthropic.com</code>.</p>
+
+    <h4>Attempt C: Correct host but missing <code>client_id</code></h4>
+<pre><code><span class="cmd">$ curl -s https://platform.claude.com/v1/oauth/token \
+  -d "grant_type=refresh_token&amp;refresh_token=..."</span>
+<span class="output" style="color:var(--red)">{"error":{"type":"invalid_request_error","message":"Invalid request format"}}</span></code></pre>
+    <p><strong>Why it failed:</strong> Missing the required <code>client_id</code> and <code>scope</code> parameters.</p>
+  </div>
+</details>
+
+<!-- ═══════════════════════════════════════════ TOKEN REFRESH FLOW ══════════════════════════════ -->
+<h3>Token Refresh — Complete Transaction Flow</h3>
+
+<div class="diagram-container">
+<pre class="seq-diagram">
+<span class="seq-actor">Script</span>                    <span class="seq-actor">Keychain</span>              <span class="seq-actor">platform.claude.com</span>        <span class="seq-actor">api.anthropic.com</span>
+  │                          │                          │                          │
+  │ <span class="seq-arrow">── read credentials ──▶</span>  │                          │                          │
+  │ <span class="seq-arrow">◀── JSON blob ─────────</span>  │                          │                          │
+  │                          │                          │                          │
+  │  <span class="seq-note">Check: is expiresAt < now?</span>                        │                          │
+  │                          │                          │                          │
+  │  <span class="seq-note">[if expired]</span>             │                          │                          │
+  │ <span class="seq-arrow">─── POST /v1/oauth/token ──────────────────────▶</span>  │                          │
+  │    <span class="seq-note">grant_type=refresh_token</span>                       │                          │
+  │    <span class="seq-note">refresh_token=sk-ant-ort01-...</span>                  │                          │
+  │    <span class="seq-note">client_id=9d1c250a-...</span>                          │                          │
+  │    <span class="seq-note">scope=user:inference ...</span>                         │                          │
+  │                          │                          │                          │
+  │ <span class="seq-arrow">◀── {access_token, refresh_token, expires_in} ──</span>  │                          │
+  │                          │                          │                          │
+  │ <span class="seq-arrow">── update credentials ─▶</span> │                          │                          │
+  │                          │                          │                          │
+  │  <span class="seq-note">[proceed with new token]</span>  │                          │                          │
+  │ <span class="seq-arrow">────── POST /v1/messages ──────────────────────────────────────────────────▶</span>  │
+  │    <span class="seq-note">Authorization: Bearer {new_access_token}</span>                                   │
+  │    <span class="seq-note">anthropic-beta: oauth-2025-04-20</span>                                           │
+  │                          │                          │                          │
+  │ <span class="seq-arrow">◀──── 200 + rate limit headers ────────────────────────────────────────────</span>  │
+  │                          │                          │                          │
+</pre>
+</div>
+
+<!-- ═══════════════════════════════════════════ FINAL SCRIPT ════════════════════════════════════ -->
+<h2 id="final-script">8. The Final Script</h2>
+
+<p>Putting it all together — a self-contained script that reads credentials, refreshes if expired, calls the API, and displays a usage dashboard:</p>
+
+<details open>
+  <summary><code>claude_usage.sh</code> — Complete Source</summary>
+  <div class="content">
+<pre><code>#!/bin/bash
+# claude_usage.sh — Check Claude Pro/Max rate limit usage
+# Reads OAuth token from macOS Keychain (set by Claude Code)
+# Automatically refreshes expired tokens
+
+set -euo pipefail
+
+CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+TOKEN_URL="https://platform.claude.com/v1/oauth/token"
+SCOPES="user:inference user:inference:claude_code user:sessions:claude_code user:mcp_servers user:file_upload"
+
+# ── Read credentials from Keychain ──────────────────────────────
+CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w)
+TOKEN=$(echo "$CREDS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])")
+REFRESH_TOKEN=$(echo "$CREDS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['refreshToken'])")
+EXPIRES_AT=$(echo "$CREDS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['expiresAt'])")
+
+# ── Refresh token if expired ────────────────────────────────────
+NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
+if [ "$NOW_MS" -ge "$EXPIRES_AT" ]; then
+  echo "Token expired. Refreshing..."
+  ENCODED_SCOPES=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$SCOPES'))")
+  REFRESH_RESP=$(curl -s "$TOKEN_URL" \
+    -H "content-type: application/x-www-form-urlencoded" \
+    -d "grant_type=refresh_token&amp;refresh_token=\$REFRESH_TOKEN&amp;client_id=\$CLIENT_ID&amp;scope=\$ENCODED_SCOPES")
+
+  if echo "$REFRESH_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if 'access_token' in d else 1)" 2>/dev/null; then
+    NEW_ACCESS=$(echo "$REFRESH_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+    NEW_REFRESH=$(echo "$REFRESH_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('refresh_token',''))")
+    EXPIRES_IN=$(echo "$REFRESH_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_in',3600))")
+    NEW_EXPIRES_AT=$(python3 -c "import time; print(int(time.time()*1000 + $EXPIRES_IN*1000))")
+
+    # Update the keychain with new tokens
+    UPDATED_JSON=$(echo "$CREDS_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['claudeAiOauth']['accessToken'] = '$NEW_ACCESS'
+if '$NEW_REFRESH': d['claudeAiOauth']['refreshToken'] = '$NEW_REFRESH'
+d['claudeAiOauth']['expiresAt'] = $NEW_EXPIRES_AT
+print(json.dumps(d))
+")
+    security delete-generic-password -s "Claude Code-credentials" -a "$(whoami)" &gt;/dev/null 2&gt;&amp;1 || true
+    security add-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w "$UPDATED_JSON"
+    TOKEN="$NEW_ACCESS"
+    echo "Token refreshed successfully."
+  else
+    echo "ERROR: Token refresh failed:"
+    echo "$REFRESH_RESP" | python3 -m json.tool 2&gt;/dev/null || echo "$REFRESH_RESP"
+    exit 1
+  fi
+fi
+
+# ── Call API and read rate limit headers ────────────────────────
+HEADERS=$(curl -s -D - -o /dev/null https://api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: oauth-2025-04-20" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,
+       "messages":[{"role":"user","content":"hi"}]}' 2&gt;/dev/null)
+
+# ── Parse and display ───────────────────────────────────────────
+STATUS=$(echo "$HEADERS" | grep "unified-status:" | head -1 | awk '{print $2}' | tr -d '\r')
+# ... (parse remaining headers and display dashboard)
+</code></pre>
+  </div>
+</details>
+
+<h3>Sample Output</h3>
+<pre><code><span class="output">╔══════════════════════════════════════════╗
+║        Claude Pro Usage Dashboard        ║
+╠══════════════════════════════════════════╣
+║  Status:          allowed               ║
+║──────────────────────────────────────────║
+║  5-Hour Window:   allowed               ║
+║    Used:          55%                   ║
+║    Remaining:     45%                   ║
+║    Resets:        Sun Mar 29 02:00 AM PDT║
+║──────────────────────────────────────────║
+║  7-Day Window:    allowed               ║
+║    Used:          75%                   ║
+║    Remaining:     25%                   ║
+║    Resets:        Tue Mar 31 12:00 PM PDT║
+║──────────────────────────────────────────║
+║  Overage:         rejected              ║
+╚══════════════════════════════════════════╝</span></code></pre>
+
+<!-- ═══════════════════════════════════════════ SUMMARY ════════════════════════════════════════ -->
+<h2 id="key-findings">9. Key Findings Summary</h2>
+
+<div class="timeline">
+  <div class="timeline-item key">
+    <h3>Finding #1 — Credential Storage</h3>
+    <p>OAuth tokens are stored in the <strong>macOS Keychain</strong> under service <code>"Claude Code-credentials"</code>, as a JSON blob containing <code>accessToken</code>, <code>refreshToken</code>, <code>expiresAt</code>, and metadata.</p>
+    <pre><code>security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w</code></pre>
+  </div>
+
+  <div class="timeline-item key">
+    <h3>Finding #2 — The Beta Header</h3>
+    <p>OAuth tokens require the header <code>anthropic-beta: oauth-2025-04-20</code> to be accepted by <code>api.anthropic.com/v1/messages</code>. Without it, you get a 401.</p>
+  </div>
+
+  <div class="timeline-item key">
+    <h3>Finding #3 — Unified Rate Limits</h3>
+    <p>Pro/Max plans use a <strong>unified rate limit</strong> system with two rolling windows (5-hour, 7-day), exposed via <code>anthropic-ratelimit-unified-*</code> response headers.</p>
+  </div>
+
+  <div class="timeline-item key">
+    <h3>Finding #4 — Token Refresh</h3>
+    <p>Refresh via <code>POST https://platform.claude.com/v1/oauth/token</code> with form-encoded body: <code>grant_type=refresh_token</code>, <code>client_id=9d1c250a-...</code>, <code>refresh_token=...</code>, <code>scope=...</code>.</p>
+  </div>
+
+  <div class="timeline-item success">
+    <h3>Finding #5 — Reverse-Engineering Method</h3>
+    <p>The <code>strings</code> command on the compiled binary is the most effective way to extract API endpoints, client IDs, headers, and request shapes from Claude Code.</p>
+  </div>
+</div>
+
+<div class="callout callout-warning">
+  <strong>Important Caveats</strong>
+  <ul style="margin-top:8px">
+    <li>These are <strong>undocumented, internal APIs</strong>. They may change without notice.</li>
+    <li>Each usage-check call consumes a tiny amount of your rate limit (1 output token of Haiku).</li>
+    <li>The <code>client_id</code> and beta headers are extracted from Claude Code v2.1.87 and may differ in other versions.</li>
+    <li>Modifying keychain entries could affect Claude Code's operation if done incorrectly.</li>
+  </ul>
+</div>
+
+</div><!-- /container -->
+
+<footer style="text-align:center; padding:40px; color:var(--text-dim); border-top:1px solid var(--border); margin-top:40px;">
+  <p>Reverse-engineered on March 28, 2026 &middot; Claude Code v2.1.87 &middot; macOS</p>
+</footer>
+
+</body>
+</html>
