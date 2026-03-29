@@ -12,6 +12,16 @@ Reverse engineering Claude Code and Codex/OpenAI authorization — OAuth flows, 
 - **Claude** — OAuth token flow analysis, binary reverse engineering, keychain credential extraction
 - **Codex** — Auth state discovery, refresh token recovery, ChatGPT usage API reverse engineering
 
+#### Tree View
+Expanded view with per-model usage breakdowns, auth details, and refresh timing.
+
+![Usage Dashboard — Tree View](screenshots/dashboard_tree_view.png)
+
+#### Grid View
+Side-by-side account comparison with usage bars and reset countdowns.
+
+![Usage Dashboard — Grid View](screenshots/dashboard_grid_view.png)
+
 ## Browse
 
 Open [`index.html`](index.html) in a browser or visit the [GitHub Pages site](https://apoorva87.github.io/RevEng101/) to navigate all project docs.
