@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Hub</title>
+<link rel="stylesheet" href="/static/base.css">
+</head>
+<body>
+<div id="progress-bar" style="width:0%"></div>
+
+<div class="page-layout">
+<!-- ── HEADER ── -->
+<div class="page-header">
+  <div class="topbar">
+    <span class="brand">SESSION HUB</span>
+    <div class="tabs" id="provider-tabs">
+      <button class="tab active" data-provider="all">All</button>
+    </div>
+    <div class="topbar-right">
+      <span id="last-update">&mdash;</span>
+      <button class="refresh-btn on" id="refresh-toggle" title="Toggle auto-refresh">Auto</button>
+    </div>
+  </div>
+  <div class="active-strip" id="active-strip"></div>
+  <div id="error-banner"></div>
+  <div class="metrics" id="metrics-row">
+    <div class="metric highlight"><div class="label">Sessions</div><div class="value" id="m-total">&mdash;</div></div>
+    <div class="metric"><div class="label">Active Now</div><div class="value" id="m-active">&mdash;</div></div>
+    <div class="metric warn"><div class="label">Rate Limited</div><div class="value" id="m-ratelimit">&mdash;</div></div>
+    <div class="metric danger"><div class="label">Errors</div><div class="value" id="m-errors">&mdash;</div></div>
+    <div class="metric"><div class="label">Total Tokens</div><div class="value" id="m-tokens">&mdash;</div></div>
+    <div class="metric"><div class="label">Claude Tokens</div><div class="value" id="m-claude">&mdash;</div></div>
+    <div class="metric"><div class="label">Codex Tokens</div><div class="value" id="m-codex">&mdash;</div></div>
+    <div class="metric"><div class="label">Projects</div><div class="value" id="m-projects">&mdash;</div></div>
+  </div>
+  <div class="quick-stats" id="quick-stats"></div>
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Filter sessions… (provider, project, state, session id)" autocomplete="off">
+    <span id="bulk-delete-slot">
+      <span class="inactivity-control"><input type="number" id="inact-days" value="3" min="1" max="365"><span class="unit">days</span></span>
+      <button class="bulk-delete-btn" id="bulk-delete" disabled style="opacity:0.4">Delete 0 inactive</button>
+    </span>
+  </div>
+</div>
+
+<!-- ── MIDDLE (scrollable) ── -->
+<div class="page-middle">
+  <div class="table-wrap">
+    <table id="sessions-table">
+      <thead><tr id="table-head">
+        <th data-key="provider">Provider</th>
+        <th data-key="session_id">Session</th>
+        <th data-key="project_name">Project</th>
+        <th data-key="state">State</th>
+        <th data-key="last_activity_at" class="sorted-desc">Last Activity</th>
+        <th data-key="total_tokens">Tokens</th>
+        <th data-key="user_messages">Msgs</th>
+        <th data-key="tool_uses">Tools</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── BOTTOM (detail panel) ── -->
+<div class="page-bottom closed" id="detail-panel"></div>
+</div>
+
+<script src="/static/base.js"></script>
+<script>
+(function(){
+  var U = window.DashUtils;
+  var REFRESH_MS = 12000;
+  var data = null;
+  var selectedProvider = "all";
+  var searchText = "";
+  var sortKey = "last_activity_at";
+  var sortDir = "desc";
+  var selectedSessionId = null;
+
+  function getInactivityDays(){
+    var el = document.getElementById("inact-days");
+    var v = parseInt(el && el.value, 10);
+    if(!v || v < 1) return 1;
+    if(v > 365) return 365;
+    return v;
+  }
+
+  var refreshCtrl = U.createRefreshController({
+    interval: REFRESH_MS, onTick: fetchData,
+    progressBar: document.getElementById("progress-bar"),
+    refreshBtn: document.getElementById("refresh-toggle"),
+    lastUpdateEl: document.getElementById("last-update")
+  });
+  document.getElementById("refresh-toggle").onclick = function(){ refreshCtrl.toggle(); };
+
+  document.getElementById("inact-days").addEventListener("input", function(){ render(); });
+
+  async function fetchData(){
+    try{
+      var resp = await fetch("/api/sessions");
+      if(!resp.ok) throw new Error("HTTP "+resp.status);
+      data = await resp.json();
+      render();
+      document.getElementById("error-banner").innerHTML = "";
+      if(data.errors && data.errors.length){
+        document.getElementById("error-banner").innerHTML =
+          '<div class="error-banner">'+data.errors.map(function(e){ return U.escHtml(e.provider)+": "+U.escHtml(e.error); }).join("; ")+'</div>';
+      }
+    }catch(e){
+      document.getElementById("error-banner").innerHTML =
+        '<div class="error-banner">Fetch error: '+U.escHtml(String(e))+'</div>';
+    }
+    document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+  }
+
+  function isInactive(s){
+    var ts = s.last_activity_at || 0;
+    return ts > 0 && (Date.now()/1000 - ts) > getInactivityDays() * 86400;
+  }
+
+  function renderQuickStats(){
+    if(!data) return;
+    var nowTs=Date.now()/1000;
+    var cutoff5h=nowTs-5*3600;
+    var cutoff7d=nowTs-7*86400;
+    var sessions=data.sessions||[];
+    var h5={i:0,o:0,t:0}, d7={i:0,o:0,t:0};
+    sessions.forEach(function(s){
+      var ts=s.last_activity_at||0;
+      if(!ts) return;
+      if(ts>=cutoff5h){
+        h5.i+=s.input_tokens||0;
+        h5.o+=s.output_tokens||0;
+        h5.t+=s.total_tokens||0;
+      }
+      if(ts>=cutoff7d){
+        d7.i+=s.input_tokens||0;
+        d7.o+=s.output_tokens||0;
+        d7.t+=s.total_tokens||0;
+      }
+    });
+    var el=document.getElementById("quick-stats");
+    el.innerHTML=
+      '<div class="qs-group"><span class="qs-label">5h</span>'+
+        '<span class="qs-item">in <span class="qs-val">'+U.compact(h5.i)+'</span></span>'+
+        '<span class="qs-item">out <span class="qs-val">'+U.compact(h5.o)+'</span></span>'+
+        '<span class="qs-item">total <span class="qs-val">'+U.compact(h5.t)+'</span></span></div>'+
+      '<div class="qs-group"><span class="qs-label">7d</span>'+
+        '<span class="qs-item">in <span class="qs-val">'+U.compact(d7.i)+'</span></span>'+
+        '<span class="qs-item">out <span class="qs-val">'+U.compact(d7.o)+'</span></span>'+
+        '<span class="qs-item">total <span class="qs-val">'+U.compact(d7.t)+'</span></span></div>';
+  }
+
+  function render(){
+    if(!data) return;
+    var m = data.metrics||{};
+    document.getElementById("m-total").textContent = U.compact(m.total_sessions);
+    document.getElementById("m-active").textContent = U.compact(m.active_now);
+    document.getElementById("m-ratelimit").textContent = U.compact(m.rate_limited);
+    document.getElementById("m-errors").textContent = U.compact(m.errors);
+    document.getElementById("m-tokens").textContent = U.compact(m.total_tokens);
+    document.getElementById("m-claude").textContent = U.compact(m.claude_tokens);
+    document.getElementById("m-codex").textContent = U.compact(m.codex_tokens);
+    document.getElementById("m-projects").textContent = U.compact(m.projects);
+    renderQuickStats();
+
+    // Provider tabs
+    var tabsEl = document.getElementById("provider-tabs");
+    var providers = data.providers||[];
+    var tabsHtml = '<button class="tab '+(selectedProvider==="all"?"active":"")+'" data-provider="all">All</button>';
+    providers.forEach(function(p){
+      tabsHtml += '<button class="tab '+(selectedProvider===p.id?"active":"")+'" data-provider="'+U.escHtml(p.id)+'">'+U.escHtml(p.label)+'</button>';
+    });
+    tabsEl.innerHTML = tabsHtml;
+    tabsEl.querySelectorAll(".tab").forEach(function(btn){
+      btn.onclick = function(){ selectedProvider=btn.dataset.provider; render(); };
+    });
+
+    // Active strip
+    var activeEl = document.getElementById("active-strip");
+    var active = (data.active_sessions||[]).filter(function(s){ return selectedProvider==="all"||s.provider===selectedProvider; });
+    activeEl.innerHTML = active.map(function(s){
+      return '<div class="active-card"><span class="pulse-dot"></span><span class="sid">'+U.escHtml(s.display_label)+'</span><span class="proj">'+U.escHtml(s.project_name)+'</span><span class="tokens">'+U.compact(s.total_tokens)+'</span></div>';
+    }).join("");
+
+    // Filter + sort + mark inactive
+    var sessions = (data.sessions||[]).filter(function(s){
+      if(selectedProvider!=="all" && s.provider!==selectedProvider) return false;
+      if(!searchText) return true;
+      var q=searchText.toLowerCase();
+      return [s.provider,s.session_id,s.display_label,s.project_name,s.state,s.account_label,s.working_path]
+        .some(function(v){ return v&&String(v).toLowerCase().includes(q); });
+    }).map(function(s){
+      s = Object.assign({}, s);
+      if(isInactive(s) && s.state_category==="idle"){
+        s._inactive = true; s._orig_state = s.state; s.state = "inactive";
+      }
+      return s;
+    });
+
+    sessions = U.sortSessions(sessions, sortKey, sortDir);
+
+    // Table body
+    var tbody = document.getElementById("table-body");
+    if(!sessions.length){
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No sessions found</td></tr>';
+    }else{
+      tbody.innerHTML = sessions.map(function(s){
+        var sel = s.session_id===selectedSessionId?"selected":"";
+        var inact = s._inactive ? " inactive-row" : "";
+        return '<tr class="'+sel+inact+'" data-sid="'+U.escHtml(s.session_id)+'">'+
+          '<td><span class="provider-badge '+U.escHtml(s.provider)+'">'+U.escHtml(s.provider)+'</span></td>'+
+          '<td>'+U.escHtml(s.display_label)+'</td>'+
+          '<td>'+U.escHtml(s.project_name)+'</td>'+
+          '<td><span class="state '+U.stateClass(s)+'">'+U.escHtml(U.stateLabel(s))+'</span></td>'+
+          '<td>'+U.relTime(s.last_activity_at)+'</td>'+
+          '<td>'+U.compact(s.total_tokens)+'</td>'+
+          '<td>'+U.compact(s.user_messages+s.assistant_messages)+'</td>'+
+          '<td>'+U.compact(s.tool_uses)+'</td>'+
+          '<td>'+
+            (s.resume_command?'<button class="cmd-copy" data-cmd="'+U.escHtml(s.resume_command)+'">cp</button>':'')+
+            ' <button class="delete-btn" data-sid="'+U.escHtml(s.session_id)+'">&times;</button>'+
+          '</td></tr>';
+      }).join("");
+    }
+
+    // Row click -> detail
+    tbody.querySelectorAll("tr[data-sid]").forEach(function(row){
+      row.onclick = function(e){
+        if(e.target.classList.contains("cmd-copy")||e.target.classList.contains("delete-btn")) return;
+        selectedSessionId = selectedSessionId===row.dataset.sid?null:row.dataset.sid;
+        renderDetail(sessions);
+        tbody.querySelectorAll("tr").forEach(function(r){r.classList.toggle("selected",r.dataset.sid===selectedSessionId);});
+      };
+    });
+    tbody.querySelectorAll(".cmd-copy").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.copyText(btn.dataset.cmd,btn);};});
+    tbody.querySelectorAll(".delete-btn").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.deleteSession("/api/sessions",btn.dataset.sid,function(){fetchData();});};});
+
+    // Bulk delete
+    var inactiveCount = sessions.filter(function(s){ return s._inactive; }).length;
+    var days = getInactivityDays();
+    var bulkBtn = document.getElementById("bulk-delete");
+    bulkBtn.textContent = "Delete "+inactiveCount+" inactive";
+    if(inactiveCount > 0){
+      bulkBtn.disabled = false;
+      bulkBtn.style.opacity = "";
+      bulkBtn.onclick = function(){U.deleteInactive("/api/sessions/inactive",inactiveCount,days,function(){fetchData();});};
+    } else {
+      bulkBtn.disabled = true;
+      bulkBtn.style.opacity = "0.4";
+      bulkBtn.onclick = null;
+    }
+
+    renderDetail(sessions);
+    U.initColumnResize(document.getElementById("sessions-table"));
+  }
+
+  function renderDetail(sessions){
+    var panel = document.getElementById("detail-panel");
+    if(!selectedSessionId){ panel.classList.add("closed"); return; }
+    var s = (sessions||(data.sessions||[])).find(function(x){ return x.session_id===selectedSessionId; });
+    if(!s){ panel.classList.add("closed"); return; }
+    panel.classList.remove("closed");
+    var fields = [
+      ["Provider",s.provider],["Session ID",s.session_id],["Project",s.project_name],
+      ["Working Path",s.working_path],["Account",s.account_label],
+      ["State",(s._orig_state||s.state)+(s._inactive?" (inactive)":"")+" ("+s.state_category+")"],
+      ["First Activity",U.formatStamp(s.first_activity_at)],["Last Activity",U.formatStamp(s.last_activity_at)],
+      ["Duration",(s.duration_seconds?Math.round(s.duration_seconds/60)+"m":"\u2014")],
+      ["Input",U.compact(s.input_tokens)],["Output",U.compact(s.output_tokens)],["Total",U.compact(s.total_tokens)],
+      ["User Msgs",String(s.user_messages)],["Asst Msgs",String(s.assistant_messages)],["Tools",String(s.tool_uses)],
+      ["Last Prompt",s.last_prompt||"\u2014"],["Last Error",s.last_error||"\u2014"],
+    ];
+    var html = '<div class="detail-grid">';
+    fields.forEach(function(f){html += '<div class="detail-field"><div class="dlabel">'+U.escHtml(f[0])+'</div><div class="dvalue">'+U.escHtml(String(f[1]||"\u2014"))+'</div></div>';});
+    if(s.resume_command) html += '<div class="detail-field" style="grid-column:1/-1"><div class="dlabel">Resume Command</div><div class="dvalue mono">'+U.escHtml(s.resume_command)+' <button class="cmd-copy" onclick="DashUtils.copyText(\''+U.escHtml(s.resume_command.replace(/'/g,"\\'"))+'\',this)">copy</button></div></div>';
+    html += '</div>';
+    panel.innerHTML = html;
+  }
+
+  // ── Sort headers ──
+  document.getElementById("table-head").querySelectorAll("th[data-key]").forEach(function(th){
+    th.onclick = function(){
+      var key=th.dataset.key;
+      if(sortKey===key) sortDir=sortDir==="desc"?"asc":"desc";
+      else{ sortKey=key; sortDir="desc"; }
+      document.querySelectorAll("#table-head th").forEach(function(h){h.classList.remove("sorted-asc","sorted-desc");});
+      th.classList.add(sortDir==="desc"?"sorted-desc":"sorted-asc");
+      render();
+    };
+  });
+
+  document.getElementById("search").addEventListener("input",function(){searchText=this.value.trim();render();});
+
+  fetchData().then(function(){ refreshCtrl.schedule(); });
+})();
+</script>
+</body>
+</html>

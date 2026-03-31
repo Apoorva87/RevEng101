@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Sessions</title>
+<link rel="stylesheet" href="/static/base.css">
+</head>
+<body>
+<div id="progress-bar" style="width:0%"></div>
+
+<div class="page-layout">
+<!-- ── HEADER (fixed) ── -->
+<div class="page-header">
+  <div class="topbar">
+    <span class="brand">CLAUDE SESSIONS</span>
+    <div class="pills" id="account-pills"></div>
+    <div class="tabs" id="view-tabs">
+      <button class="tab active" data-view="sessions">Sessions</button>
+      <button class="tab" data-view="projects">Projects</button>
+      <button class="tab" data-view="timeline">Timeline</button>
+    </div>
+    <div class="topbar-right">
+      <span id="last-update">&mdash;</span>
+      <button class="refresh-btn on" id="refresh-toggle" title="Toggle auto-refresh">Auto</button>
+    </div>
+  </div>
+  <div class="active-strip" id="active-strip"></div>
+  <div id="error-banner"></div>
+  <div class="metrics" id="metrics-row">
+    <div class="metric highlight"><div class="label">Input</div><div class="value" id="m-input">&mdash;</div></div>
+    <div class="metric"><div class="label">Output</div><div class="value" id="m-output">&mdash;</div></div>
+    <div class="metric"><div class="label">Cache Read</div><div class="value" id="m-cache">&mdash;</div></div>
+    <div class="metric"><div class="label">Sessions</div><div class="value" id="m-sessions">&mdash;</div></div>
+    <div class="metric"><div class="label">Projects</div><div class="value" id="m-projects">&mdash;</div></div>
+    <div class="metric"><div class="label">Latest</div><div class="value" id="m-latest">&mdash;</div></div>
+    <div class="metric warn"><div class="label">Rate Limited</div><div class="value" id="m-ratelimit">&mdash;</div></div>
+    <div class="metric danger"><div class="label">Errors</div><div class="value" id="m-errors">&mdash;</div></div>
+  </div>
+  <div class="quick-stats" id="quick-stats"></div>
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Filter sessions… (project, state, session id, account)" autocomplete="off">
+    <span id="bulk-delete-slot"></span>
+  </div>
+</div>
+
+<!-- ── MIDDLE (scrollable) ── -->
+<div class="page-middle">
+  <div id="view-sessions">
+    <div class="table-wrap">
+      <table id="sessions-table">
+        <thead><tr id="table-head">
+          <th data-key="session_id">Session</th>
+          <th data-key="project_name">Project</th>
+          <th data-key="state">State</th>
+          <th data-key="last_access_at" class="sorted-desc">Last Activity</th>
+          <th data-key="total_tokens">Tokens</th>
+          <th data-key="user_prompts">Msgs</th>
+          <th data-key="account_label">Account</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="view-projects" style="display:none">
+    <div class="table-wrap">
+      <table id="projects-table">
+        <thead><tr id="projects-head">
+          <th data-key="project_path">Project</th>
+          <th data-key="session_count">Sessions</th>
+          <th data-key="total_tokens">Tokens</th>
+          <th data-key="last_access_at">Last Activity</th>
+          <th data-key="account_label">Account</th>
+        </tr></thead>
+        <tbody id="projects-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="view-timeline" style="display:none">
+    <div id="selection-summary-slot"></div>
+    <div class="zoom-bar">
+      <span class="zoom-label">View</span>
+      <span class="zoom-range" id="zoom-range">...</span>
+      <span class="zoom-mode" id="zoom-mode">DAY</span>
+      <button class="zoom-btn" id="zoom-reset">Reset</button>
+    </div>
+    <div class="zoom-minimap" id="zoom-minimap"></div>
+    <div class="timeline-wrap">
+      <div class="timeline-chart" id="timeline-chart"></div>
+      <div class="timeline-labels" id="timeline-labels"></div>
+    </div>
+    <div class="project-legend" id="project-legend"></div>
+  </div>
+</div>
+
+<!-- ── BOTTOM (detail panel, pinned ~25%) ── -->
+<div class="page-bottom closed" id="detail-panel"></div>
+</div><!-- /page-layout -->
+
+<script src="/static/base.js"></script>
+<script>
+(function(){
+  var U = window.DashUtils;
+  var REFRESH_MS = 12000;
+  var INACTIVITY_DAYS = 3;
+  var data = null;
+  var selectedAccount = "all";
+  var selectedView = "sessions";
+  var searchText = "";
+  var sortKey = "last_access_at";
+  var sortDir = "desc";
+  var selectedSessionId = null;
+
+  // Projects view state
+  var selectedProjectId = null;
+
+  // Timeline state
+  var allProjects = [];
+  var projectColorMap = {};
+  var selectedProjects = [];
+  var selectedBuckets = [];
+  var timelineBuckets = null;
+
+  // Zoom state
+  var zoomStart = 0;
+  var zoomEnd = -1; // -1 means "all"
+  var effectiveBucketMode = "day";
+  var dayBuckets = [];
+  var hourBuckets = [];
+
+  var refreshCtrl = U.createRefreshController({
+    interval: REFRESH_MS, onTick: fetchData,
+    progressBar: document.getElementById("progress-bar"),
+    refreshBtn: document.getElementById("refresh-toggle"),
+    lastUpdateEl: document.getElementById("last-update")
+  });
+  document.getElementById("refresh-toggle").onclick = function(){ refreshCtrl.toggle(); };
+
+  // ── Fetch ──
+  async function fetchData(){
+    try{
+      var resp = await fetch("/api/state");
+      if(!resp.ok) throw new Error("HTTP "+resp.status);
+      data = await resp.json();
+      buildAllBuckets();
+      render();
+      document.getElementById("error-banner").innerHTML = "";
+    }catch(e){
+      document.getElementById("error-banner").innerHTML =
+        '<div class="error-banner">Fetch error: '+U.escHtml(String(e))+'</div>';
+    }
+    document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+  }
+
+  // ── Helpers ──
+  function getInactivityDays(){
+    var el = document.getElementById("inact-days");
+    if(el){ var v = parseInt(el.value); if(v>=1) return v; }
+    return INACTIVITY_DAYS;
+  }
+  function sessionTokens(s){ var t=s.tokens||{}; return {input:parseInt(t.input_tokens||0),output:parseInt(t.output_tokens||0),cache:parseInt(t.cache_read_input_tokens||0),total:parseInt(t.total_tokens||0)}; }
+  function projectName(s){ var p=s.project_path||s.project_key||""; var parts=p.split("/"); return parts[parts.length-1]||p||"(unknown)"; }
+  function stateClass(s){ var st=s.state||""; if(st==="rate_limited") return "blocked rate_limited"; if(st==="error") return "blocked error"; if(st==="awaiting_assistant"||st==="awaiting_tool_result") return "running"; if(st==="inactive") return "inactive"; return "idle"; }
+  function isInactive(s){ var days=getInactivityDays(); var ts=s.last_access_at||s.last_event_at||0; return ts>0&&(Date.now()/1000-ts)>days*86400; }
+  function applyInactivity(s){ if(isInactive(s)&&s.state!=="rate_limited"&&s.state!=="error"){s._inactive=true;s._orig_state=s.state;s.state="inactive";} return s; }
+
+  function filteredSessions(){
+    if(!data) return [];
+    return (data.sessions||[]).map(function(s){ return applyInactivity(Object.assign({},s)); }).filter(function(s){
+      if(selectedAccount!=="all"&&(s.account_key||"unknown")!==selectedAccount) return false;
+      if(!searchText) return true;
+      var q=searchText.toLowerCase();
+      return [s.session_id,projectName(s),s.state,s.account_label,s.working_path,s.last_prompt].some(function(v){return v&&String(v).toLowerCase().includes(q);});
+    });
+  }
+  function filteredProjects(){
+    if(!data) return [];
+    return (data.projects||[]).filter(function(p){
+      if(selectedAccount!=="all"&&(p.account_key||"unknown")!==selectedAccount) return false;
+      if(!searchText) return true;
+      var q=searchText.toLowerCase();
+      return [p.project_path,p.account_label].some(function(v){return v&&String(v).toLowerCase().includes(q);});
+    });
+  }
+
+  // ── Build both day and hour bucket arrays ──
+  function buildAllBuckets(){
+    if(!data) return;
+    dayBuckets = buildBucketsFromRows((data.activity||{}).day_rows||[]);
+    hourBuckets = buildBucketsFromRows((data.activity||{}).hour_rows||[]);
+  }
+
+  function buildBucketsFromRows(rows){
+    if(selectedAccount!=="all") rows=rows.filter(function(r){return r.account_key===selectedAccount;});
+    var bucketsMap={};
+    var projSet={};
+    rows.forEach(function(r){
+      var key=r.label||r.bucket_start;
+      var proj=(r.project_path||"").split("/").pop()||"(unknown)";
+      projSet[proj]=true;
+      if(!bucketsMap[key]) bucketsMap[key]={key:key,projects:{},total:0};
+      bucketsMap[key].projects[proj]=(bucketsMap[key].projects[proj]||0)+parseInt(r.total_tokens||0);
+      bucketsMap[key].total+=parseInt(r.total_tokens||0);
+    });
+    var sorted=Object.keys(bucketsMap).sort();
+    return sorted.map(function(k){return bucketsMap[k];});
+  }
+
+  // ── Render ──
+  function render(){
+    if(!data) return;
+    var ov=data.overview||{};
+
+    // Metrics: if timeline with selected projects, compute filtered metrics
+    if(selectedView==="timeline"&&selectedProjects.length>0){
+      renderFilteredMetrics();
+    }else{
+      document.getElementById("m-input").textContent=U.compact(ov.read_tokens_total);
+      document.getElementById("m-output").textContent=U.compact(ov.write_tokens_total);
+      document.getElementById("m-cache").textContent=U.compact((data.sessions||[]).reduce(function(a,s){return a+parseInt((s.tokens||{}).cache_read_input_tokens||0);},0));
+      document.getElementById("m-sessions").textContent=U.compact(ov.session_count);
+      document.getElementById("m-projects").textContent=U.compact(ov.project_count);
+    }
+    document.getElementById("m-latest").textContent=U.relTime(ov.latest_access_at);
+    document.getElementById("m-ratelimit").textContent=String(ov.rate_limited_sessions||0);
+    document.getElementById("m-errors").textContent=String(ov.error_sessions||0);
+
+    renderAccountPills();
+    renderActiveStrip();
+    renderQuickStats();
+    if(selectedView==="sessions") renderSessionsTable();
+    else if(selectedView==="projects") renderProjectsTable();
+    else if(selectedView==="timeline") renderTimeline();
+    renderBulkDelete();
+    U.initColumnResize(document.getElementById("sessions-table"));
+  }
+
+  function renderFilteredMetrics(){
+    // Aggregate from activity rows scoped to visible time window + selected projects
+    var visibleKeys=timelineBuckets?timelineBuckets.map(function(b){return b.key;}):null;
+    var useRows=effectiveBucketMode==="hour"?(data.activity||{}).hour_rows||[]:(data.activity||{}).day_rows||[];
+    if(selectedAccount!=="all") useRows=useRows.filter(function(r){return r.account_key===selectedAccount;});
+    var totalIn=0,totalOut=0,totalCache=0;
+    var sessionSet={};
+    var projectSet={};
+    useRows.forEach(function(r){
+      var key=r.label||r.bucket_start;
+      // Scope to visible window
+      if(visibleKeys&&visibleKeys.indexOf(key)<0) return;
+      var proj=(r.project_path||"").split("/").pop()||"(unknown)";
+      if(selectedProjects.indexOf(proj)<0) return;
+      totalIn+=parseInt(r.read_tokens||0);
+      totalOut+=parseInt(r.write_tokens||0);
+      totalCache+=parseInt(r.cache_read_tokens||0);
+      projectSet[proj]=true;
+      if(r.session_id) sessionSet[r.session_id]=true;
+    });
+    document.getElementById("m-input").textContent=U.compact(totalIn);
+    document.getElementById("m-output").textContent=U.compact(totalOut);
+    document.getElementById("m-cache").textContent=U.compact(totalCache);
+    document.getElementById("m-sessions").textContent=U.compact(Object.keys(sessionSet).length);
+    document.getElementById("m-projects").textContent=U.compact(Object.keys(projectSet).length);
+  }
+
+  function renderQuickStats(){
+    if(!data) return;
+    var nowTs=Date.now()/1000;
+    var cutoff5h=nowTs-5*3600;
+    var cutoff7d=nowTs-7*86400;
+    var hourRows=(data.activity||{}).hour_rows||[];
+    var dayRows=(data.activity||{}).day_rows||[];
+    if(selectedAccount!=="all"){
+      hourRows=hourRows.filter(function(r){return r.account_key===selectedAccount;});
+      dayRows=dayRows.filter(function(r){return r.account_key===selectedAccount;});
+    }
+    // Last 5 hours: use hour_rows, match buckets within last 5h
+    var h5={i:0,o:0,t:0};
+    hourRows.forEach(function(r){
+      var bs=r.bucket_start;
+      if(!bs) return;
+      // bucket_start is a timestamp or date string
+      var bsTs;
+      if(typeof bs==="number") bsTs=bs;
+      else{ try{bsTs=new Date(bs.replace(" ","T")).getTime()/1000;}catch(e){return;} }
+      if(bsTs>=cutoff5h){
+        h5.i+=parseInt(r.read_tokens||0);
+        h5.o+=parseInt(r.write_tokens||0);
+        h5.t+=parseInt(r.total_tokens||0);
+      }
+    });
+    // Last 7 days: use day_rows, match buckets within last 7d
+    var d7={i:0,o:0,t:0};
+    dayRows.forEach(function(r){
+      var bs=r.bucket_start;
+      if(!bs) return;
+      var bsTs;
+      if(typeof bs==="number") bsTs=bs;
+      else{ try{bsTs=new Date(bs.replace(" ","T")).getTime()/1000;}catch(e){return;} }
+      if(bsTs>=cutoff7d){
+        d7.i+=parseInt(r.read_tokens||0);
+        d7.o+=parseInt(r.write_tokens||0);
+        d7.t+=parseInt(r.total_tokens||0);
+      }
+    });
+    var el=document.getElementById("quick-stats");
+    el.innerHTML=
+      '<div class="qs-group"><span class="qs-label">5h</span>'+
+        '<span class="qs-item">in <span class="qs-val">'+U.compact(h5.i)+'</span></span>'+
+        '<span class="qs-item">out <span class="qs-val">'+U.compact(h5.o)+'</span></span>'+
+        '<span class="qs-item">total <span class="qs-val">'+U.compact(h5.t)+'</span></span></div>'+
+      '<div class="qs-group"><span class="qs-label">7d</span>'+
+        '<span class="qs-item">in <span class="qs-val">'+U.compact(d7.i)+'</span></span>'+
+        '<span class="qs-item">out <span class="qs-val">'+U.compact(d7.o)+'</span></span>'+
+        '<span class="qs-item">total <span class="qs-val">'+U.compact(d7.t)+'</span></span></div>';
+  }
+
+  function renderAccountPills(){
+    var accounts=data.accounts||[];
+    var html='<button class="pill'+(selectedAccount==="all"?" active":"")+'" data-account="all">All</button>';
+    accounts.forEach(function(a){ html+='<button class="pill'+(selectedAccount===a.account_key?" active":"")+'" data-account="'+U.escHtml(a.account_key)+'">'+U.escHtml(a.label)+'</button>'; });
+    var el=document.getElementById("account-pills"); el.innerHTML=html;
+    el.querySelectorAll(".pill").forEach(function(btn){ btn.onclick=function(){selectedAccount=btn.dataset.account;render();}; });
+  }
+
+  function renderActiveStrip(){
+    var sessions=filteredSessions().filter(function(s){return s.state==="awaiting_assistant"||s.state==="awaiting_tool_result";});
+    document.getElementById("active-strip").innerHTML=sessions.map(function(s){
+      return '<div class="active-card"><span class="pulse-dot"></span><span class="sid">'+U.escHtml(s.session_id.substring(0,12))+'</span><span class="proj">'+U.escHtml(projectName(s))+'</span><span class="tokens">'+U.compact(sessionTokens(s).total)+'</span></div>';
+    }).join("");
+  }
+
+  function renderSessionsTable(){
+    var sessions=U.sortSessions(filteredSessions().map(function(s){
+      var t=sessionTokens(s);
+      return Object.assign({},s,{total_tokens:t.total,user_prompts:parseInt((s.tokens||{}).user_prompts||0)+parseInt((s.tokens||{}).assistant_messages||0),project_name:projectName(s)});
+    }),sortKey,sortDir);
+    var tbody=document.getElementById("table-body");
+    if(!sessions.length){ tbody.innerHTML='<tr><td colspan="8" class="empty">No sessions found</td></tr>'; }
+    else{
+      tbody.innerHTML=sessions.map(function(s){
+        var sel=s.session_id===selectedSessionId?"selected":"";
+        var inact=s._inactive?" inactive-row":"";
+        return '<tr class="'+sel+inact+'" data-sid="'+U.escHtml(s.session_id)+'"><td>'+U.escHtml(s.session_id.substring(0,12))+'</td><td>'+U.escHtml(s.project_name)+'</td><td><span class="state '+stateClass(s)+'">'+U.escHtml((s.state||"").replace(/_/g," "))+'</span></td><td>'+U.relTime(s.last_access_at||s.last_event_at)+'</td><td>'+U.compact(s.total_tokens)+'</td><td>'+U.compact(s.user_prompts)+'</td><td>'+U.escHtml(s.account_label||"")+'</td><td>'+(s.resume_command?'<button class="cmd-copy" data-cmd="'+U.escHtml(s.resume_command)+'">cp</button>':'')+' <button class="delete-btn" data-sid="'+U.escHtml(s.session_id)+'">&times;</button></td></tr>';
+      }).join("");
+    }
+    tbody.querySelectorAll("tr[data-sid]").forEach(function(row){
+      row.onclick=function(e){
+        if(e.target.classList.contains("cmd-copy")||e.target.classList.contains("delete-btn"))return;
+        selectedSessionId=selectedSessionId===row.dataset.sid?null:row.dataset.sid;
+        renderDetail(sessions);
+        tbody.querySelectorAll("tr").forEach(function(r){r.classList.toggle("selected",r.dataset.sid===selectedSessionId);});
+      };
+    });
+    tbody.querySelectorAll(".cmd-copy").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.copyText(btn.dataset.cmd,btn);};});
+    tbody.querySelectorAll(".delete-btn").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.deleteSession("/api/session",btn.dataset.sid,function(){fetchData();});};});
+    renderDetail(sessions);
+  }
+
+  function renderProjectsTable(){
+    var projects=filteredProjects();
+    var tbody=document.getElementById("projects-body");
+    if(!projects.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No projects found</td></tr>';}
+    else{
+      tbody.innerHTML=projects.map(function(p){
+        var t=p.tokens||{};
+        var name=(p.project_path||"").split("/").pop()||p.project_path||"(unknown)";
+        var sel=selectedProjectId&&(p.project_path===selectedProjectId||p.project_id===selectedProjectId)?" selected":"";
+        return '<tr class="project-row'+sel+'" data-project-path="'+U.escHtml(p.project_path||"")+'" data-project-id="'+U.escHtml(p.project_id||p.project_path||"")+'"><td>'+U.escHtml(name)+'</td><td>'+String(p.session_count||0)+'</td><td>'+U.compact(parseInt(t.total_tokens||0))+'</td><td>'+U.relTime(p.last_access_at)+'</td><td>'+U.escHtml(p.account_label||"")+'</td></tr>';
+      }).join("");
+    }
+    // Click handler for project rows
+    tbody.querySelectorAll("tr.project-row").forEach(function(row){
+      row.onclick=function(){
+        var pid=row.dataset.projectPath||row.dataset.projectId;
+        if(selectedProjectId===pid){
+          selectedProjectId=null;
+        }else{
+          selectedProjectId=pid;
+        }
+        // Update row selection visually
+        tbody.querySelectorAll("tr.project-row").forEach(function(r){
+          r.classList.toggle("selected",(r.dataset.projectPath||r.dataset.projectId)===selectedProjectId);
+        });
+        renderBottomPane();
+      };
+    });
+    renderBottomPane();
+  }
+
+  // ── Bottom pane: session detail OR project sessions ──
+  function renderBottomPane(){
+    var panel=document.getElementById("detail-panel");
+    // If projects view with a selected project, show project sessions
+    if(selectedView==="projects"&&selectedProjectId){
+      renderProjectSessions(panel);
+      return;
+    }
+    // If sessions view with a selected session, show session detail
+    if(selectedView==="sessions"&&selectedSessionId){
+      // renderDetail handles this
+      return;
+    }
+    panel.classList.add("closed");
+  }
+
+  function renderProjectSessions(panel){
+    if(!data||!selectedProjectId){panel.classList.add("closed");return;}
+    // Find sessions matching this project
+    var sessions=(data.sessions||[]).filter(function(s){
+      return (s.project_path||"")=== selectedProjectId;
+    }).map(function(s){
+      var t=sessionTokens(s);
+      return Object.assign({},applyInactivity(Object.assign({},s)),{total_tokens:t.total,user_prompts:parseInt((s.tokens||{}).user_prompts||0)+parseInt((s.tokens||{}).assistant_messages||0)});
+    });
+    var projName=(selectedProjectId||"").split("/").pop()||selectedProjectId||"(unknown)";
+    var html='<div class="project-detail-header"><span class="proj-name">'+U.escHtml(projName)+'</span><span class="proj-stat">'+sessions.length+' session'+(sessions.length!==1?'s':'')+'</span><button class="proj-close" id="proj-close">&times; Close</button></div>';
+    html+='<table class="project-sessions-table"><thead><tr><th>Session ID</th><th>State</th><th>Last Activity</th><th>Tokens</th><th>Msgs</th></tr></thead><tbody>';
+    if(!sessions.length){
+      html+='<tr><td colspan="5" class="empty">No sessions</td></tr>';
+    }else{
+      sessions.forEach(function(s){
+        html+='<tr><td>'+U.escHtml(s.session_id.substring(0,12))+'</td><td><span class="state '+stateClass(s)+'">'+U.escHtml((s.state||"").replace(/_/g," "))+'</span></td><td>'+U.relTime(s.last_access_at||s.last_event_at)+'</td><td>'+U.compact(s.total_tokens)+'</td><td>'+U.compact(s.user_prompts)+'</td></tr>';
+      });
+    }
+    html+='</tbody></table>';
+    panel.innerHTML=html;
+    panel.classList.remove("closed");
+    document.getElementById("proj-close").onclick=function(){
+      selectedProjectId=null;
+      document.querySelectorAll("tr.project-row").forEach(function(r){r.classList.remove("selected");});
+      panel.classList.add("closed");
+    };
+  }
+
+  // ── Stacked Timeline ──
+  function getVisibleBuckets(){
+    var src=effectiveBucketMode==="day"?dayBuckets:hourBuckets;
+    if(zoomEnd<0||zoomEnd>=src.length) return src;
+    return src.slice(zoomStart,zoomEnd+1);
+  }
+
+  function autoSwitchBucketMode(){
+    // If zoomed to <=3 day buckets, switch to hour mode filtered to that date range
+    if(effectiveBucketMode==="day"){
+      var visDays=dayBuckets.slice(zoomStart,zoomEnd<0?dayBuckets.length:zoomEnd+1);
+      if(visDays.length<=3&&visDays.length>0&&hourBuckets.length>0){
+        // Get date range from visible day buckets
+        var firstKey=visDays[0].key;
+        var lastKey=visDays[visDays.length-1].key;
+        effectiveBucketMode="hour";
+        // Filter hour buckets to matching date range
+        // Hour keys are like "2025-03-25 14:00" or similar; day keys are "2025-03-25"
+        var matchingStart=-1,matchingEnd=-1;
+        hourBuckets.forEach(function(b,i){
+          var dayPart=b.key.substring(0,10);
+          if(dayPart>=firstKey.substring(0,10)&&dayPart<=lastKey.substring(0,10)){
+            if(matchingStart<0) matchingStart=i;
+            matchingEnd=i;
+          }
+        });
+        if(matchingStart>=0){
+          zoomStart=matchingStart;
+          zoomEnd=matchingEnd;
+        }else{
+          zoomStart=0;
+          zoomEnd=hourBuckets.length-1;
+        }
+      }
+    }else if(effectiveBucketMode==="hour"){
+      // If zoomed out enough that we cover >3 days worth, switch back to day
+      var visHours=hourBuckets.slice(zoomStart,zoomEnd<0?hourBuckets.length:zoomEnd+1);
+      if(visHours.length>0){
+        var daySet={};
+        visHours.forEach(function(b){daySet[b.key.substring(0,10)]=true;});
+        if(Object.keys(daySet).length>3){
+          effectiveBucketMode="day";
+          // Map back to day buckets covering same range
+          var firstDay=visHours[0].key.substring(0,10);
+          var lastDay=visHours[visHours.length-1].key.substring(0,10);
+          var dStart=-1,dEnd=-1;
+          dayBuckets.forEach(function(b,i){
+            var dk=b.key.substring(0,10);
+            if(dk>=firstDay&&dk<=lastDay){
+              if(dStart<0) dStart=i;
+              dEnd=i;
+            }
+          });
+          if(dStart>=0){
+            zoomStart=dStart;
+            zoomEnd=dEnd;
+          }else{
+            zoomStart=0;
+            zoomEnd=-1;
+          }
+        }
+      }
+    }
+  }
+
+  function renderTimeline(){
+    // Build stable color map from ALL buckets (colors don't shift on zoom)
+    var src=effectiveBucketMode==="day"?dayBuckets:hourBuckets;
+    var allProjSet={};
+    src.forEach(function(b){Object.keys(b.projects).forEach(function(p){allProjSet[p]=true;});});
+    var allProjsSorted=Object.keys(allProjSet).sort();
+    projectColorMap={};
+    allProjsSorted.forEach(function(p,i){projectColorMap[p]=U.projectColor(i);});
+
+    autoSwitchBucketMode();
+    var visible=getVisibleBuckets();
+    timelineBuckets=visible;
+
+    // Build project list from VISIBLE buckets only
+    var visProjSet={};
+    visible.forEach(function(b){Object.keys(b.projects).forEach(function(p){visProjSet[p]=true;});});
+    allProjects=Object.keys(visProjSet).sort();
+    // Prune selectedProjects to only those still visible
+    selectedProjects=selectedProjects.filter(function(p){return visProjSet[p];});
+
+    if(!visible||!visible.length){
+      document.getElementById("timeline-chart").innerHTML='<div class="empty">No timeline data</div>';
+      document.getElementById("timeline-labels").innerHTML="";
+      document.getElementById("project-legend").innerHTML="";
+      document.getElementById("selection-summary-slot").innerHTML="";
+      renderZoomBar(visible);
+      return;
+    }
+
+    renderZoomBar(visible);
+
+    var maxVal=Math.max(1,Math.max.apply(null,visible.map(function(b){return b.total;})));
+    var visibleProjects=selectedProjects.length?selectedProjects:allProjects;
+    var chartEl=document.getElementById("timeline-chart");
+    var labelsEl=document.getElementById("timeline-labels");
+
+    chartEl.innerHTML=visible.map(function(b,bi){
+      var barH=Math.max(2,b.total/maxVal*100);
+      var segs="";
+      var visTotal=0;
+      allProjects.forEach(function(p){
+        var val=b.projects[p]||0;
+        if(!val) return;
+        var isVis=visibleProjects.indexOf(p)>=0;
+        visTotal+=isVis?val:0;
+        var segH=val/b.total*barH;
+        var opacity=isVis?"1":"0.15";
+        segs+='<span class="bar-segment" style="height:'+segH+'%;background:'+projectColorMap[p]+';opacity:'+opacity+'" data-project="'+U.escHtml(p)+'" data-tokens="'+val+'"></span>';
+      });
+      var isSel=selectedBuckets.indexOf(b.key)>=0;
+      var isDim=selectedBuckets.length>0&&!isSel;
+      return '<div class="bucket-bar'+(isSel?" drag-selected":"")+(isDim?" dim":"")+'" data-bucket-key="'+U.escHtml(b.key)+'" data-idx="'+bi+'" style="height:'+barH+'%" title="'+U.escHtml(b.key)+': '+U.compact(b.total)+'">'+segs+'</div>';
+    }).join("");
+
+    labelsEl.innerHTML=visible.map(function(b){
+      var k=b.key;
+      var label;
+      if(effectiveBucketMode==="hour"){
+        // Show HH:00 format
+        var timePart=k.length>=13?k.substring(11,13):"??";
+        label=timePart+":00";
+      }else{
+        // Show MM-DD format
+        label=k.length>=10?k.substring(5,10):k;
+      }
+      return '<span>'+U.escHtml(label)+'</span>';
+    }).join("");
+
+    // Click on bar
+    chartEl.querySelectorAll(".bucket-bar").forEach(function(bar){
+      bar.onclick=function(e){
+        e.stopPropagation();
+        var key=bar.dataset.bucketKey;
+        if(selectedBuckets.length===1&&selectedBuckets[0]===key) selectedBuckets=[];
+        else selectedBuckets=[key];
+        renderTimeline();
+      };
+    });
+
+    // Drag select
+    setupTimelineDrag(chartEl);
+    // Mousewheel zoom
+    setupTimelineZoom(chartEl);
+    // Minimap slider
+    var fullSrc=effectiveBucketMode==="day"?dayBuckets:hourBuckets;
+    U.renderZoomMinimap(document.getElementById("zoom-minimap"),fullSrc,zoomStart,
+      zoomEnd<0?fullSrc.length-1:zoomEnd,
+      function(ns,ne){zoomStart=ns;zoomEnd=ne;renderTimeline();});
+    renderProjectLegend();
+    renderSelectionSummary();
+  }
+
+  function renderZoomBar(visible){
+    var rangeEl=document.getElementById("zoom-range");
+    var modeEl=document.getElementById("zoom-mode");
+    if(!visible||!visible.length){
+      rangeEl.textContent="No data";
+      modeEl.textContent=effectiveBucketMode.toUpperCase();
+      return;
+    }
+    var firstKey=visible[0].key;
+    var lastKey=visible[visible.length-1].key;
+    // Format range label nicely
+    function fmtLabel(k){
+      try{
+        var d=new Date(k.replace(" ","T"));
+        if(isNaN(d.getTime())) return k;
+        var months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        if(effectiveBucketMode==="hour"){
+          return months[d.getMonth()]+" "+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":00";
+        }
+        return months[d.getMonth()]+" "+d.getDate();
+      }catch(e){return k;}
+    }
+    var rangeText=fmtLabel(firstKey);
+    if(firstKey!==lastKey) rangeText+=" \u2013 "+fmtLabel(lastKey);
+    rangeEl.textContent=rangeText;
+    modeEl.textContent=effectiveBucketMode.toUpperCase();
+  }
+
+  function setupTimelineZoom(chartEl){
+    chartEl.addEventListener("wheel",function(e){
+      e.preventDefault();
+      var src=effectiveBucketMode==="day"?dayBuckets:hourBuckets;
+      if(!src.length) return;
+
+      var curStart=zoomStart;
+      var curEnd=(zoomEnd<0||zoomEnd>=src.length)?src.length-1:zoomEnd;
+      var visLen=curEnd-curStart+1;
+
+      // Determine cursor position ratio within chart
+      var rect=chartEl.getBoundingClientRect();
+      var ratio=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+
+      var zoomAmount=Math.max(1,Math.round(visLen*0.15));
+
+      if(e.deltaY<0){
+        // Zoom in
+        var shrinkLeft=Math.round(zoomAmount*ratio);
+        var shrinkRight=zoomAmount-shrinkLeft;
+        curStart=Math.min(curStart+shrinkLeft,curEnd);
+        curEnd=Math.max(curEnd-shrinkRight,curStart);
+      }else{
+        // Zoom out
+        var growLeft=Math.round(zoomAmount*ratio);
+        var growRight=zoomAmount-growLeft;
+        curStart=Math.max(0,curStart-growLeft);
+        curEnd=Math.min(src.length-1,curEnd+growRight);
+      }
+      if(curStart===curEnd&&visLen>1){
+        // Don't zoom to a single bucket
+        if(curStart>0) curStart--;
+        else if(curEnd<src.length-1) curEnd++;
+      }
+      zoomStart=curStart;
+      zoomEnd=curEnd;
+      renderTimeline();
+    },{passive:false});
+  }
+
+  document.getElementById("zoom-reset").onclick=function(){
+    zoomStart=0;
+    zoomEnd=-1;
+    effectiveBucketMode="day";
+    renderTimeline();
+  };
+
+  var _dragState=null;
+  function setupTimelineDrag(chartEl){
+    chartEl.onmousedown=function(e){
+      var bar=e.target.closest(".bucket-bar");
+      if(!bar) return;
+      _dragState={startIdx:parseInt(bar.dataset.idx),endIdx:parseInt(bar.dataset.idx)};
+      e.preventDefault();
+    };
+    document.onmousemove=function(e){
+      if(!_dragState) return;
+      var bars=Array.from(document.querySelectorAll("#timeline-chart .bucket-bar"));
+      var best=-1,bestD=Infinity;
+      bars.forEach(function(b,i){var r=b.getBoundingClientRect();var d=Math.abs(e.clientX-(r.left+r.width/2));if(d<bestD){bestD=d;best=i;}});
+      if(best>=0) _dragState.endIdx=best;
+      var lo=Math.min(_dragState.startIdx,_dragState.endIdx),hi=Math.max(_dragState.startIdx,_dragState.endIdx);
+      bars.forEach(function(b,i){b.classList.toggle("drag-selected",i>=lo&&i<=hi);b.classList.toggle("dim",i<lo||i>hi);});
+    };
+    document.onmouseup=function(){
+      if(!_dragState) return;
+      var lo=Math.min(_dragState.startIdx,_dragState.endIdx),hi=Math.max(_dragState.startIdx,_dragState.endIdx);
+      selectedBuckets=[];
+      for(var i=lo;i<=hi;i++) if(timelineBuckets[i]) selectedBuckets.push(timelineBuckets[i].key);
+      _dragState=null;
+      renderTimeline();
+    };
+  }
+
+  function renderProjectLegend(){
+    var el=document.getElementById("project-legend");
+    var hasFilter=selectedProjects.length>0;
+    el.innerHTML=allProjects.map(function(p){
+      var active=!hasFilter||selectedProjects.indexOf(p)>=0;
+      return '<button class="legend-item'+(active?" active":"")+(hasFilter&&!active?" dimmed":"")+'" data-project="'+U.escHtml(p)+'"><span class="legend-swatch" style="background:'+projectColorMap[p]+'"></span>'+U.escHtml(p)+'</button>';
+    }).join("");
+    el.querySelectorAll(".legend-item").forEach(function(btn){
+      btn.onclick=function(){
+        var proj=btn.dataset.project;
+        var idx=selectedProjects.indexOf(proj);
+        if(idx>=0) selectedProjects.splice(idx,1);
+        else selectedProjects.push(proj);
+        render();
+      };
+    });
+  }
+
+  function renderSelectionSummary(){
+    var slot=document.getElementById("selection-summary-slot");
+    if(!selectedBuckets.length&&!selectedProjects.length){slot.innerHTML="";return;}
+    var visProjects=selectedProjects.length?selectedProjects:allProjects;
+    var visBuckets=selectedBuckets.length?selectedBuckets:timelineBuckets.map(function(b){return b.key;});
+    var totalIn=0,totalOut=0,totalAll=0;
+    var rows=effectiveBucketMode==="day"?(data.activity||{}).day_rows||[]:(data.activity||{}).hour_rows||[];
+    if(selectedAccount!=="all") rows=rows.filter(function(r){return r.account_key===selectedAccount;});
+    rows.forEach(function(r){
+      var key=r.label||r.bucket_start;
+      var proj=(r.project_path||"").split("/").pop()||"(unknown)";
+      if(visBuckets.indexOf(key)<0) return;
+      if(visProjects.indexOf(proj)<0) return;
+      totalIn+=parseInt(r.read_tokens||0);
+      totalOut+=parseInt(r.write_tokens||0);
+      totalAll+=parseInt(r.total_tokens||0);
+    });
+    var parts=[];
+    if(selectedBuckets.length) parts.push('<span class="sel-label">Buckets</span><span class="sel-value">'+selectedBuckets.length+'</span>');
+    if(selectedProjects.length) parts.push('<span class="sel-label">Projects</span><span class="sel-value">'+selectedProjects.length+'</span>');
+    parts.push('<span class="sel-label">Input</span><span class="sel-value">'+U.compact(totalIn)+'</span>');
+    parts.push('<span class="sel-label">Output</span><span class="sel-value">'+U.compact(totalOut)+'</span>');
+    parts.push('<span class="sel-label">Total</span><span class="sel-value">'+U.compact(totalAll)+'</span>');
+    parts.push('<span class="sel-clear" id="sel-clear">Clear</span>');
+    slot.innerHTML='<div class="selection-summary">'+parts.join("")+'</div>';
+    document.getElementById("sel-clear").onclick=function(){selectedBuckets=[];selectedProjects=[];render();};
+  }
+
+  function renderBulkDelete(){
+    var days=getInactivityDays();
+    var inactiveCount=filteredSessions().filter(function(s){return s._inactive;}).length;
+    var slot=document.getElementById("bulk-delete-slot");
+    slot.innerHTML='<span class="inactivity-control"><input type="number" id="inact-days" value="'+days+'" min="1" max="365"><span class="unit">days</span></span> <button class="bulk-delete-btn" id="bulk-delete">Delete '+inactiveCount+' inactive</button>';
+    document.getElementById("inact-days").onchange=function(){
+      INACTIVITY_DAYS=parseInt(this.value)||3;
+      render();
+    };
+    if(inactiveCount>0){
+      document.getElementById("bulk-delete").onclick=function(){
+        var d=getInactivityDays();
+        U.deleteInactive("/api/sessions/inactive",inactiveCount,d,function(){fetchData();});
+      };
+    }else{
+      document.getElementById("bulk-delete").disabled=true;
+      document.getElementById("bulk-delete").style.opacity="0.4";
+    }
+  }
+
+  function renderDetail(sessions){
+    var panel=document.getElementById("detail-panel");
+    // If in projects view and a project is selected, let renderProjectSessions handle it
+    if(selectedView==="projects"&&selectedProjectId) return;
+    if(!selectedSessionId){panel.classList.add("closed");return;}
+    var s=(sessions||filteredSessions()).find(function(x){return x.session_id===selectedSessionId;});
+    if(!s){panel.classList.add("closed");return;}
+    panel.classList.remove("closed");
+    var t=s.tokens||{};
+    var fields=[
+      ["Session ID",s.session_id],["Project",projectName(s)],["Working Path",s.working_path||s.project_path],
+      ["Account",s.account_label],["State",(s._orig_state||s.state)+(s._inactive?" (inactive)":"")],
+      ["First Activity",U.formatStamp(s.first_event_at)],["Last Activity",U.formatStamp(s.last_access_at||s.last_event_at)],
+      ["Duration",s.duration_minutes?s.duration_minutes+"m":"\u2014"],
+      ["Input",U.compact(parseInt(t.input_tokens||0))],["Output",U.compact(parseInt(t.output_tokens||0))],
+      ["Cache Read",U.compact(parseInt(t.cache_read_input_tokens||0))],["Cache Create",U.compact(parseInt(t.cache_creation_input_tokens||0))],
+      ["Total",U.compact(parseInt(t.total_tokens||0))],["Last Prompt",s.last_prompt||"\u2014"],["Last Error",s.last_error_text||"\u2014"],
+    ];
+    var html='<div class="detail-grid">';
+    fields.forEach(function(f){html+='<div class="detail-field"><div class="dlabel">'+U.escHtml(f[0])+'</div><div class="dvalue">'+U.escHtml(String(f[1]||"\u2014"))+'</div></div>';});
+    if(s.resume_command) html+='<div class="detail-field" style="grid-column:1/-1"><div class="dlabel">Resume Command</div><div class="dvalue mono">'+U.escHtml(s.resume_command)+' <button class="cmd-copy" onclick="DashUtils.copyText(\''+U.escHtml(s.resume_command.replace(/'/g,"\\'"))+'\',this)">copy</button></div></div>';
+    html+='</div>';
+    panel.innerHTML=html;
+  }
+
+  // ── View tabs ──
+  document.getElementById("view-tabs").querySelectorAll(".tab").forEach(function(btn){
+    btn.onclick=function(){
+      selectedView=btn.dataset.view;
+      document.querySelectorAll("#view-tabs .tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===selectedView);});
+      document.getElementById("view-sessions").style.display=selectedView==="sessions"?"":"none";
+      document.getElementById("view-projects").style.display=selectedView==="projects"?"":"none";
+      document.getElementById("view-timeline").style.display=selectedView==="timeline"?"":"none";
+      // Reset bottom pane when switching views
+      if(selectedView!=="projects") selectedProjectId=null;
+      if(selectedView!=="sessions") selectedSessionId=null;
+      document.getElementById("detail-panel").classList.add("closed");
+      render();
+    };
+  });
+
+  // ── Sort headers ──
+  document.getElementById("table-head").querySelectorAll("th[data-key]").forEach(function(th){
+    th.onclick=function(){
+      var key=th.dataset.key;
+      if(sortKey===key)sortDir=sortDir==="desc"?"asc":"desc";else{sortKey=key;sortDir="desc";}
+      document.querySelectorAll("#table-head th").forEach(function(h){h.classList.remove("sorted-asc","sorted-desc");});
+      th.classList.add(sortDir==="desc"?"sorted-desc":"sorted-asc");
+      render();
+    };
+  });
+
+  document.getElementById("search").addEventListener("input",function(){searchText=this.value.trim();render();});
+
+  // ── Boot ──
+  fetchData().then(function(){refreshCtrl.schedule();});
+})();
+</script>
+</body>
+</html>
