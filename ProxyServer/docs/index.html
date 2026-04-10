@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProxyServer Documentation</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html" class="active">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <h1>ProxyServer Documentation
+    <span class="subtitle">Learn how HTTP proxies work by building and using one</span>
+  </h1>
+
+  <p>ProxyServer is a local HTTP/HTTPS forward proxy with a real-time web dashboard. It lets you see, inspect, and modify every HTTP request and response flowing through it — a powerful tool for reverse engineering APIs, debugging web applications, and understanding how the web works under the hood.</p>
+
+  <div class="diagram"><span class="hl">Browser / App</span>
+       │
+       ▼  HTTP request
+<span class="hl-cyan">┌──────────────────┐</span>
+<span class="hl-cyan">│ ProxyServer:9080 │</span>  ← You configure your app to route traffic here
+<span class="hl-cyan">└────────┬─────────┘</span>
+         │
+         │  ① Captures request + response
+         │  ② Optionally intercepts (hold/modify/drop)
+         │  ③ Forwards to real server
+         │
+         ├──────────────────►  <span class="hl-green">Upstream Server</span>  (the real destination)
+         │
+         ▼
+<span class="hl-yellow">┌──────────────────┐</span>
+<span class="hl-yellow">│ Dashboard :9081  │</span>  ← You open this in your browser to see traffic
+<span class="hl-yellow">└──────────────────┘</span></div>
+
+  <h2>What Can You Do With It?</h2>
+
+  <div class="card-grid">
+    <a href="getting-started.html" class="card">
+      <span class="card-icon">&#9881;</span>
+      <h3>Inspect API Traffic</h3>
+      <p>See every request and response in real time with syntax-highlighted bodies, headers, and timing.</p>
+    </a>
+    <a href="certificates.html" class="card">
+      <span class="card-icon">&#128274;</span>
+      <h3>Decrypt HTTPS</h3>
+      <p>See inside encrypted connections with automatic TLS interception and on-the-fly certificate generation.</p>
+    </a>
+    <a href="interception.html" class="card">
+      <span class="card-icon">&#9995;</span>
+      <h3>Intercept &amp; Modify</h3>
+      <p>Pause requests mid-flight, edit headers/body/method, then forward or drop them.</p>
+    </a>
+    <a href="ai-chat.html" class="card">
+      <span class="card-icon">&#129302;</span>
+      <h3>AI Chat Agent</h3>
+      <p>Ask an embedded AI about captured traffic, generate curl commands, and create rules using natural language.</p>
+    </a>
+    <a href="architecture.html" class="card">
+      <span class="card-icon">&#128736;</span>
+      <h3>Understand the Architecture</h3>
+      <p>Learn how every component works — from the proxy core to the TLS handler to the ring buffer.</p>
+    </a>
+    <a href="api-reference.html" class="card">
+      <span class="card-icon">&#128214;</span>
+      <h3>REST &amp; WebSocket API</h3>
+      <p>Full reference for programmatic control — traffic, rules, sessions, export, and real-time events.</p>
+    </a>
+  </div>
+
+  <h2>Prerequisites</h2>
+
+  <ul>
+    <li><strong>Node.js 18+</strong> — the proxy is pure Node.js with only 2 dependencies (<code>ws</code> for WebSockets, <code>node-forge</code> for TLS certificates)</li>
+    <li><strong>A browser</strong> — for viewing the dashboard</li>
+    <li><strong>Any HTTP client</strong> — curl, a browser, Postman, a mobile app — anything that can route through an HTTP proxy</li>
+  </ul>
+
+  <h2>Quick Start</h2>
+
+  <pre><code><span class="cmt"># Clone and install</span>
+<span class="fn">npm</span> install
+
+<span class="cmt"># Start the proxy</span>
+<span class="fn">node</span> server.js
+
+<span class="cmt"># In another terminal — send a test request through the proxy</span>
+<span class="fn">curl</span> -x http://localhost:9080 http://httpbin.org/get
+
+<span class="cmt"># Open the dashboard</span>
+<span class="fn">open</span> http://localhost:9081</code></pre>
+
+  <p>You should see your request appear in the dashboard immediately. Read the <a href="getting-started.html">full setup guide</a> for configuring browsers, HTTPS, and system-wide proxying.</p>
+
+  <h2>Key Concepts</h2>
+
+  <h3>What Is a Forward Proxy?</h3>
+  <p>A <strong>forward proxy</strong> sits between your HTTP client (browser, curl, app) and the internet. Instead of your client connecting directly to <code>example.com</code>, it connects to the proxy, which then makes the request on your behalf. This lets the proxy inspect, log, and optionally modify the traffic flowing through it.</p>
+
+  <div class="diagram"><span class="hl-green">Without proxy:</span>
+  Browser ────────────────────► example.com
+
+<span class="hl-cyan">With forward proxy:</span>
+  Browser ──► <span class="hl">Proxy (:9080)</span> ──► example.com
+                  │
+                  ▼
+            <span class="hl-yellow">Dashboard (:9081)</span>  ← you see everything here</div>
+
+  <h3>Why Two Ports?</h3>
+  <p>The proxy runs on <code>:9080</code> and the dashboard on <code>:9081</code>. This separation is critical: if both were on the same port and your browser used the proxy, every dashboard request would create traffic entries of itself — an infinite feedback loop. Two ports keeps proxy traffic and your viewing traffic cleanly separated.</p>
+
+  <h3>HTTP vs HTTPS Interception</h3>
+  <p>HTTP traffic is plaintext — the proxy can read it directly. HTTPS is encrypted, so the proxy uses a technique called <strong>Man-in-the-Middle (MITM)</strong> interception: it generates a fake certificate for each hostname, signed by a Certificate Authority (CA) that you trust locally. This creates two separate TLS sessions — one between your client and the proxy, and one between the proxy and the real server — allowing the proxy to see the plaintext in between.</p>
+
+  <p>Read the <a href="certificates.html">TLS &amp; Certificates guide</a> for a deep explanation of how this works.</p>
+
+  <div class="page-nav">
+    <div></div>
+    <a href="getting-started.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">Installation &amp; Setup &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

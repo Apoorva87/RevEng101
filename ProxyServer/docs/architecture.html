@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html" class="active">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> Architecture</div>
+
+  <h1>Architecture
+    <span class="subtitle">How every component fits together</span>
+  </h1>
+
+  <p>ProxyServer is a ~2300-line Node.js application with only 2 npm dependencies (<code>ws</code> and <code>node-forge</code>). Everything else is built from scratch using Node's standard library. This page explains every module, its role, and how they communicate.</p>
+
+  <h2>System Architecture</h2>
+
+  <div class="diagram">┌─────────────────────────────────────────────────────────────────────────┐
+│                          <span class="hl">server.js</span> (entry point / orchestrator)            │
+│                                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌────────────────────────────┐ │
+│  │ <span class="hl-cyan">TrafficStore</span>  │    │  <span class="hl-yellow">RuleStore</span>   │    │     <span class="hl-orange">CertManager</span>            │ │
+│  │ (ring buffer) │    │ (rules.json) │    │ (CA + per-host certs)     │ │
+│  │ EventEmitter  │    └──────┬───────┘    └───────────┬───────────────┘ │
+│  └──────┬───────┘           │                        │                 │
+│         │              ┌────┴─────┐                  │                 │
+│         │              │<span class="hl-yellow">RuleEngine</span>│                  │                 │
+│         │              └────┬─────┘                  │                 │
+│         │                   │                        │                 │
+│  ┌──────┴───────────────────┴────────────────────────┴───────────────┐ │
+│  │                       <span class="hl-cyan">ProxyServer</span> (:9080)                         │ │
+│  │                                                                    │ │
+│  │  <span class="hl-green">HTTP handler</span> ──► RequestInterceptor ──► upstream (:80)            │ │
+│  │       │              (hold/forward/drop)                           │ │
+│  │       │          ResponseInterceptor ◄── upstream                 │ │
+│  │       │              (hold/forward/drop)                          │ │
+│  │       │                                                            │ │
+│  │  <span class="hl-green">CONNECT handler</span> ──► <span class="hl-orange">TLSHandler</span> ──► decrypt ──► upstream (:443)   │ │
+│  │                       • TLS termination with generated certs      │ │
+│  │                       • HTTP/2 ALPN to upstream (h2 / h1.1)      │ │
+│  │                       • HTTPStreamParser for keep-alive           │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│         │                                                               │
+│         │ EventEmitter (add / update / clear)                           │
+│         ▼                                                               │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │                     <span class="hl-yellow">DashboardServer</span> (:9081)                       │ │
+│  │                                                                    │ │
+│  │  <span class="hl-green">Static files</span> ← index.html, app.js, app.css, chat.js, chat.css    │ │
+│  │  <span class="hl-green">REST API</span>     ← /api/traffic, /api/rules, /api/sessions, ...      │ │
+│  │  <span class="hl-green">WSBridge</span>     ← WebSocket push (traffic + chat messages)         │ │
+│  │  <span class="hl-green">ChatHandler</span>  ← Routes chat:* messages to ClaudeSession          │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│                              │                                          │
+│                              ▼ WebSocket                                │
+│                     ┌─────────────────┐                                 │
+│                     │  <span class="hl">Browser UI</span>      │                                 │
+│                     │  app.js + chat.js│                                 │
+│                     └─────────────────┘                                 │
+└─────────────────────────────────────────────────────────────────────────┘</div>
+
+  <h2>Module-by-Module Breakdown</h2>
+
+  <h3>server.js — Entry Point</h3>
+  <p>The orchestrator. It creates every component, wires them together, starts both servers, and handles graceful shutdown on SIGINT/SIGTERM.</p>
+  <ul>
+    <li>Creates <code>TrafficStore</code> (5000 entry ring buffer)</li>
+    <li>Initializes <code>CertManager</code> for TLS MITM</li>
+    <li>Creates <code>RuleStore</code> → <code>RuleEngine</code> → Interceptors</li>
+    <li>Creates <code>TLSHandler</code> with cert manager and interceptors</li>
+    <li>Starts <code>ProxyServer</code> on :9080</li>
+    <li>Starts <code>DashboardServer</code> on :9081</li>
+    <li>Attaches <code>WSBridge</code> and <code>ChatHandler</code> to dashboard</li>
+  </ul>
+
+  <h3>Proxy Layer</h3>
+
+  <h4>proxy-server.js — HTTP Forward Proxy</h4>
+  <p>The core proxy. Handles two types of requests:</p>
+  <ul>
+    <li><strong>HTTP requests</strong> (absolute-URI format like <code>GET http://example.com/path</code>) — Parsed, captured to TrafficStore, forwarded to upstream with optional interception</li>
+    <li><strong>CONNECT tunnels</strong> (<code>CONNECT example.com:443</code>) — Delegated to TLSHandler for HTTPS MITM, or tunneled blindly if no TLSHandler</li>
+  </ul>
+  <p>Handles gzip/deflate/brotli decompression of response bodies for display, while forwarding the original compressed bytes to the client.</p>
+
+  <h4>tls-handler.js — TLS MITM + HTTP/2</h4>
+  <p>The most complex module. Handles HTTPS interception:</p>
+  <ol>
+    <li>Receives CONNECT tunnel from proxy-server.js</li>
+    <li>Creates a <code>tls.TLSSocket</code> wrapping the client socket, using a generated certificate for the target hostname</li>
+    <li>Parses HTTP/1.1 requests from the decrypted stream using <code>HTTPStreamParser</code></li>
+    <li>Sends upstream requests via HTTP/2 (ALPN negotiation) or falls back to HTTP/1.1</li>
+    <li>Translates HTTP/2 responses back to HTTP/1.1 for the client tunnel</li>
+    <li>Supports keep-alive — multiple requests per CONNECT tunnel</li>
+  </ol>
+
+  <p><strong>HTTPStreamParser</strong> is an inner class that provides robust HTTP/1.1 message parsing from any Node.js stream, supporting:</p>
+  <ul>
+    <li><code>Content-Length</code> based body reading</li>
+    <li><code>Transfer-Encoding: chunked</code> body reassembly</li>
+    <li>Connection-close body reading (for responses without content-length)</li>
+    <li>Proper header parsing with duplicate header support</li>
+  </ul>
+
+  <h4>cert-manager.js — Certificate Generation</h4>
+  <p>Manages the CA certificate and generates per-host leaf certificates on demand. Uses <code>node-forge</code> for RSA 2048-bit key generation and X.509 certificate creation. Two-tier cache: memory Map + disk (<code>certs/hosts/</code>).</p>
+  <p>See <a href="certificates.html">TLS &amp; Certificates</a> for a deep dive.</p>
+
+  <h4>request-interceptor.js — Request Hold/Forward/Drop</h4>
+  <p>When intercept is enabled and a rule matches, this module holds the request via a Promise. The promise resolves when the user clicks Forward (with optional modifications) or rejects when they click Drop. A 5-minute timeout auto-forwards to prevent connection leaks.</p>
+
+  <div class="diagram"><span class="hl-cyan">Request arrives</span> → RuleEngine.matchRequest(entry) → <span class="hl-yellow">match?</span>
+                                                         │
+                                              no ────► return null (pass through)
+                                              yes ────► <span class="hl-red">new Promise()</span>
+                                                         │
+                                          ┌──────────────┴──────────────┐
+                                          │                             │
+                              TrafficStore emits            setTimeout(5 min)
+                              'forward' or 'drop'           auto-resolves
+                                          │
+                              ┌───────────┴───────────┐
+                              │                       │
+                        <span class="hl-green">resolve(mods)</span>          <span class="hl-red">reject("Dropped")</span></div>
+
+  <h4>response-interceptor.js — Response Hold/Forward/Drop</h4>
+  <p>Mirror of RequestInterceptor but for the response phase. Listens for <code>forward-response</code> and <code>drop-response</code> events from TrafficStore. Same 5-minute timeout.</p>
+
+  <h3>Data Layer</h3>
+
+  <h4>traffic-entry.js — Request/Response Data Model</h4>
+  <p>Each captured request/response pair is a TrafficEntry with:</p>
+
+  <div class="diagram"><span class="hl">TrafficEntry</span>
+├── <span class="hl-cyan">id</span>           UUID (crypto.randomUUID)
+├── <span class="hl-cyan">seq</span>          Monotonic counter (1, 2, 3, ...)
+├── <span class="hl-cyan">state</span>        <span class="badge badge-cyan">pending</span> → <span class="badge badge-yellow">intercepted</span> → <span class="badge badge-accent">forwarded</span> → <span class="badge badge-green">completed</span>
+│                                                     → <span class="badge badge-red">error</span>
+│                                                     → <span class="badge badge-red">aborted</span>
+├── <span class="hl-green">request</span>
+│   ├── method, url, httpVersion, headers
+│   ├── body (Buffer, max 2MB captured)
+│   └── contentType
+├── <span class="hl-green">response</span>
+│   ├── statusCode, statusMessage, httpVersion
+│   ├── headers, body (Buffer, max 2MB, decompressed)
+│   └── contentType
+├── <span class="hl-yellow">target</span>       { host, port, protocol }
+├── <span class="hl-yellow">timing</span>       { start, ttfb, end, duration (ms) }
+├── <span class="hl-orange">intercept</span>    { wasIntercepted, wasModified, matchedRuleId, phase }
+└── clientIp, clientPort</div>
+
+  <p>Two serialization methods: <code>toJSON()</code> (full detail with base64-encoded bodies) and <code>toSummary()</code> (lightweight, no bodies — used for the traffic list).</p>
+
+  <h4>traffic-store.js — Ring Buffer + Event Emitter</h4>
+  <p>In-memory storage with a configurable size limit (default 5000). Uses a <code>Map</code> for O(1) lookups and an <code>Array</code> for ordered iteration. When full, the oldest entry is evicted (FIFO).</p>
+  <p>Extends <code>EventEmitter</code> and fires:</p>
+  <ul>
+    <li><code>add</code> — new entry added (triggers WSBridge broadcast)</li>
+    <li><code>update</code> — entry state changed (triggers WSBridge broadcast)</li>
+    <li><code>clear</code> — all entries removed (triggers WSBridge broadcast)</li>
+    <li><code>forward</code> / <code>drop</code> — user action from dashboard (triggers interceptor resolution)</li>
+    <li><code>forward-response</code> / <code>drop-response</code> — same for response phase</li>
+  </ul>
+
+  <h4>har-export.js — HAR 1.2 Export</h4>
+  <p>Converts TrafficEntry arrays to the <a href="http://www.softwareishard.com/blog/har-12-spec/">HAR 1.2 format</a>. Maps request/response data, calculates timings, and extracts query strings.</p>
+
+  <h3>Rules Layer</h3>
+
+  <h4>rule-store.js — Persistent Rule Storage</h4>
+  <p>CRUD operations for intercept rules. Persists to <code>rules.json</code> on every modification. Each rule has a UUID, pattern fields, and a direction.</p>
+
+  <h4>rule-engine.js — Pattern Matching</h4>
+  <p>Evaluates rules against traffic entries. Converts glob patterns to RegExp (e.g., <code>*api*</code> → <code>/^.*api.*$/i</code>). Matches by URL, method, content-type, and header presence/value. Filters by direction for request vs. response phase.</p>
+
+  <h3>Dashboard Layer</h3>
+
+  <h4>dashboard-server.js — HTTP Server + REST API</h4>
+  <p>A plain Node.js <code>http.createServer</code> that serves static files and the REST API. No Express, no frameworks — just URL parsing and pattern matching. Serves all files from the <code>static/</code> directory with proper MIME types.</p>
+
+  <h4>ws-bridge.js — WebSocket Bridge</h4>
+  <p>Creates a <code>WebSocket.Server</code> attached to the dashboard HTTP server. Listens for TrafficStore events and broadcasts them to all connected clients. Also routes incoming <code>chat:*</code> messages to ChatHandler.</p>
+
+  <h3>Chat Layer</h3>
+
+  <h4>chat-handler.js — Message Router</h4>
+  <p>Routes <code>chat:send</code>, <code>chat:reset</code>, <code>chat:compact</code>, and <code>chat:context-toggle</code> messages. Manages per-client context toggles and a shared ClaudeSession instance.</p>
+
+  <h4>claude-session.js — CLI Subprocess Manager</h4>
+  <p>Spawns <code>claude -p &lt;prompt&gt; --output-format stream-json</code> per turn. Maintains conversation history server-side. Parses streaming JSON events and emits <code>chunk</code> and <code>action</code> events for real-time UI updates.</p>
+
+  <h4>context-builder.js — System Prompt Assembly</h4>
+  <p>Assembles the system prompt from conditional context blocks (traffic summaries, selected entry detail, rules, source code, browser context). Caches source files with <code>fs.watch</code> invalidation. Estimates token counts for the budget indicator.</p>
+
+  <h3>Frontend Layer</h3>
+
+  <h4>app.js — Main Dashboard UI (Vanilla JS IIFE)</h4>
+  <p>~700 lines of vanilla JavaScript in an IIFE closure. State management via a single <code>state</code> object. WebSocket for real-time updates. Renders the traffic list, detail panel, modals, and handles keyboard shortcuts.</p>
+
+  <h4>chat.js — Chat Panel UI (Vanilla JS IIFE)</h4>
+  <p>~500 lines in a separate IIFE. Creates its DOM programmatically and mounts to <code>#chat-container</code>. Uses the same WebSocket connection (messages are discriminated by <code>chat:</code> prefix). Handles streaming display, context toggles, and slash commands.</p>
+
+  <h2>Project Structure</h2>
+
+  <div class="file-tree"><span class="dir">ProxyServer/</span>
+├── <span class="file">server.js</span>                          <span class="desc">Entry point — wires everything</span>
+├── <span class="file">package.json</span>                       <span class="desc">2 deps: ws, node-forge</span>
+│
+├── <span class="dir">src/</span>
+│   ├── <span class="dir">proxy/</span>
+│   │   ├── <span class="file">proxy-server.js</span>            <span class="desc">HTTP forward proxy (absolute-URI + CONNECT)</span>
+│   │   ├── <span class="file">cert-manager.js</span>            <span class="desc">CA + per-host cert generation + 2-tier cache</span>
+│   │   ├── <span class="file">tls-handler.js</span>             <span class="desc">TLS MITM + H2/H1 upstream + stream parser</span>
+│   │   ├── <span class="file">request-interceptor.js</span>     <span class="desc">Promise-based hold/forward/drop (requests)</span>
+│   │   └── <span class="file">response-interceptor.js</span>    <span class="desc">Same for responses</span>
+│   │
+│   ├── <span class="dir">traffic/</span>
+│   │   ├── <span class="file">traffic-entry.js</span>           <span class="desc">Data model (UUID, state machine, 2MB cap)</span>
+│   │   ├── <span class="file">traffic-store.js</span>           <span class="desc">Ring buffer (5000) + EventEmitter</span>
+│   │   └── <span class="file">har-export.js</span>              <span class="desc">Export to HAR 1.2 format</span>
+│   │
+│   ├── <span class="dir">dashboard/</span>
+│   │   ├── <span class="file">dashboard-server.js</span>        <span class="desc">Static files + REST API + chat routes</span>
+│   │   └── <span class="file">ws-bridge.js</span>               <span class="desc">WebSocket: traffic events + chat routing</span>
+│   │
+│   ├── <span class="dir">rules/</span>
+│   │   ├── <span class="file">rule-engine.js</span>             <span class="desc">Glob/method/header pattern matching</span>
+│   │   └── <span class="file">rule-store.js</span>              <span class="desc">CRUD + persistence to rules.json</span>
+│   │
+│   └── <span class="dir">chat/</span>
+│       ├── <span class="file">chat-handler.js</span>            <span class="desc">WebSocket chat message router</span>
+│       ├── <span class="file">claude-session.js</span>          <span class="desc">Claude CLI subprocess manager</span>
+│       └── <span class="file">context-builder.js</span>         <span class="desc">System prompt assembly + token estimation</span>
+│
+├── <span class="dir">static/</span>
+│   ├── <span class="file">index.html</span>                     <span class="desc">Dashboard shell</span>
+│   ├── <span class="file">app.js</span>                         <span class="desc">Main UI logic (vanilla JS IIFE)</span>
+│   ├── <span class="file">app.css</span>                        <span class="desc">Dark theme (CSS variables)</span>
+│   ├── <span class="file">chat.js</span>                        <span class="desc">Chat panel UI (vanilla JS IIFE)</span>
+│   └── <span class="file">chat.css</span>                       <span class="desc">Chat panel styles</span>
+│
+├── <span class="dir">extension/</span>                             <span class="desc">Chrome MV3 extension (optional)</span>
+│   ├── <span class="file">manifest.json</span>
+│   ├── <span class="file">popup.html</span> / <span class="file">popup.js</span>
+│
+├── <span class="dir">docs/</span>                                  <span class="desc">This documentation</span>
+├── <span class="dir">certs/</span>                                 <span class="desc">Generated CA + host certs (gitignored)</span>
+└── <span class="dir">sessions/</span>                              <span class="desc">Saved traffic captures (gitignored)</span></div>
+
+  <h2>Communication Patterns</h2>
+
+  <h3>EventEmitter (Server-side)</h3>
+  <p>TrafficStore is the central event bus. Components communicate by emitting and listening to events on the store:</p>
+
+  <div class="diagram"><span class="hl">TrafficStore events:</span>
+
+  <span class="hl-cyan">ProxyServer</span>  ── add(entry) ──►  <span class="hl-yellow">TrafficStore</span>  ──► <span class="hl-green">WSBridge</span> (broadcast to clients)
+  <span class="hl-cyan">TLSHandler</span>   ── update(id)  ──►              ──► <span class="hl-green">WSBridge</span> (broadcast to clients)
+
+  <span class="hl-green">Dashboard</span> ── emit('forward', id, mods) ──►  <span class="hl-yellow">TrafficStore</span> ──► <span class="hl-orange">RequestInterceptor</span> (resolve promise)
+  <span class="hl-green">Dashboard</span> ── emit('drop', id)            ──►              ──► <span class="hl-orange">RequestInterceptor</span> (reject promise)</div>
+
+  <h3>WebSocket (Client-Server)</h3>
+  <p>A single WebSocket connection per browser tab carries both traffic updates and chat messages:</p>
+
+  <table>
+    <thead><tr><th>Direction</th><th>Message Types</th></tr></thead>
+    <tbody>
+      <tr><td>Server → Client</td><td><code>init</code>, <code>add</code>, <code>update</code>, <code>clear</code> (traffic); <code>chat:status</code>, <code>chat:chunk</code>, <code>chat:done</code>, <code>chat:error</code>, <code>chat:action</code> (chat)</td></tr>
+      <tr><td>Client → Server</td><td><code>chat:send</code>, <code>chat:reset</code>, <code>chat:compact</code>, <code>chat:context-toggle</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Design Decisions</h2>
+
+  <h3>No Frameworks</h3>
+  <p>ProxyServer uses no web frameworks (no Express, no React). This is intentional — it keeps the codebase small, dependency-free, and educational. Every HTTP handler, every DOM element, every WebSocket message is explicit.</p>
+
+  <h3>Two Ports</h3>
+  <p>Proxy (:9080) and Dashboard (:9081) are separate to avoid feedback loops where dashboard requests create traffic entries.</p>
+
+  <h3>Ring Buffer, Not Database</h3>
+  <p>Traffic is stored in memory with FIFO eviction. This keeps the proxy fast and simple — no disk I/O on the hot path. Sessions can be saved to disk explicitly.</p>
+
+  <h3>Promise-Based Interception</h3>
+  <p>Interceptors use Promises to hold requests. This integrates naturally with Node's async/await and lets the proxy pipeline wait cleanly without callbacks.</p>
+
+  <div class="page-nav">
+    <a href="ai-chat.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; AI Chat Agent</span>
+    </a>
+    <a href="request-lifecycle.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">Request Lifecycle &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

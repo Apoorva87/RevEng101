@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Installation &amp; Setup - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html" class="active">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> Getting Started</div>
+
+  <h1>Installation &amp; Setup</h1>
+
+  <h2>Install &amp; Run</h2>
+
+  <ol class="steps">
+    <li>
+      <strong>Install dependencies</strong>
+      <p>ProxyServer has only two npm dependencies: <code>ws</code> (WebSockets) and <code>node-forge</code> (TLS certificate generation).</p>
+      <pre><code><span class="fn">npm</span> install</code></pre>
+    </li>
+    <li>
+      <strong>Start the server</strong>
+      <pre><code><span class="fn">node</span> server.js</code></pre>
+      <p>You'll see:</p>
+      <pre><code>=== HTTPS MITM Setup ===
+CA certificate: /path/to/ProxyServer/certs/ca.crt
+
+=== ProxyServer Ready ===
+  Proxy:     http://localhost:9080
+  Dashboard: http://localhost:9081</code></pre>
+    </li>
+    <li>
+      <strong>Open the dashboard</strong>
+      <p>Navigate to <code>http://localhost:9081</code> in any browser. You'll see the traffic list (empty) and a status bar showing "Connected".</p>
+    </li>
+    <li>
+      <strong>Send traffic through the proxy</strong>
+      <p>Configure any HTTP client to use <code>localhost:9080</code> as its proxy and make requests. They'll appear in the dashboard in real time.</p>
+    </li>
+  </ol>
+
+  <h2>Custom Ports</h2>
+
+  <p>Use environment variables to change the default ports:</p>
+
+  <pre><code><span class="cmt"># Use port 7070 for proxy and 7071 for dashboard</span>
+PROXY_PORT=7070 DASHBOARD_PORT=7071 <span class="fn">node</span> server.js</code></pre>
+
+  <h2>Configuring HTTP Clients</h2>
+
+  <h3>curl</h3>
+
+  <p>The <code>-x</code> flag tells curl to use a proxy:</p>
+
+  <pre><code><span class="cmt"># Simple GET request</span>
+<span class="fn">curl</span> -x http://localhost:9080 http://httpbin.org/get
+
+<span class="cmt"># POST with JSON body</span>
+<span class="fn">curl</span> -x http://localhost:9080 \
+  -X POST http://httpbin.org/post \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"user": "admin", "action": "login"}'</span>
+
+<span class="cmt"># HTTPS (requires trusting the CA certificate first — see below)</span>
+<span class="fn">curl</span> -x http://localhost:9080 https://httpbin.org/get</code></pre>
+
+  <div class="info-box note">
+    <strong>Note:</strong> HTTP requests work immediately. HTTPS requests require trusting the proxy's CA certificate first — see the <a href="certificates.html">TLS &amp; Certificates</a> page.
+  </div>
+
+  <h3>macOS System Proxy</h3>
+
+  <p>Configure all HTTP traffic from your Mac to route through the proxy:</p>
+
+  <pre><code><span class="cmt"># Enable HTTP proxy on Wi-Fi</span>
+<span class="fn">networksetup</span> -setwebproxy Wi-Fi localhost 9080
+
+<span class="cmt"># Enable HTTPS proxy (requires CA trust)</span>
+<span class="fn">networksetup</span> -setsecurewebproxy Wi-Fi localhost 9080
+
+<span class="cmt"># Disable when done</span>
+<span class="fn">networksetup</span> -setwebproxystate Wi-Fi off
+<span class="fn">networksetup</span> -setsecurewebproxystate Wi-Fi off</code></pre>
+
+  <div class="info-box warning">
+    <strong>Remember to disable the system proxy when done.</strong> If ProxyServer isn't running while the system proxy is enabled, all web traffic from your Mac will fail.
+  </div>
+
+  <h3>Firefox</h3>
+
+  <p>Firefox has its own proxy settings separate from the OS:</p>
+
+  <ol>
+    <li>Open <strong>Settings</strong> &gt; <strong>General</strong> &gt; scroll to <strong>Network Settings</strong></li>
+    <li>Click <strong>Settings...</strong></li>
+    <li>Select <strong>Manual proxy configuration</strong></li>
+    <li>HTTP Proxy: <code>localhost</code>, Port: <code>9080</code></li>
+    <li>Check <strong>"Also use this proxy for HTTPS"</strong></li>
+    <li>Click OK</li>
+  </ol>
+
+  <h3>Chrome</h3>
+
+  <p>Chrome uses your operating system's proxy settings. On macOS, configure the system proxy as shown above. On Linux:</p>
+
+  <pre><code><span class="cmt"># Launch Chrome with a specific proxy</span>
+<span class="fn">google-chrome</span> --proxy-server=<span class="str">"http://localhost:9080"</span></code></pre>
+
+  <h3>iOS / Android</h3>
+
+  <p>Mobile devices can use the proxy if they're on the same network:</p>
+
+  <ol>
+    <li>Find your computer's local IP address (e.g., <code>192.168.1.42</code>)</li>
+    <li>On the mobile device, go to Wi-Fi settings &gt; proxy &gt; Manual</li>
+    <li>Set Server: <code>192.168.1.42</code>, Port: <code>9080</code></li>
+    <li>For HTTPS: install the CA certificate on the device (see <a href="certificates.html">certificates guide</a>)</li>
+  </ol>
+
+  <h2>HTTPS Setup (Quick Version)</h2>
+
+  <p>On first run, ProxyServer generates a root CA certificate at <code>certs/ca.crt</code>. Trust it once to enable HTTPS interception:</p>
+
+  <pre><code><span class="cmt"># macOS — add to system keychain (Chrome uses this automatically)</span>
+<span class="fn">sudo</span> security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain certs/ca.crt
+
+<span class="cmt"># Firefox — must import separately</span>
+<span class="cmt"># Preferences → Privacy & Security → Certificates → View Certificates → Import</span></code></pre>
+
+  <p>For a full explanation of why this is needed and how it works, read the <a href="certificates.html">TLS &amp; Certificates</a> guide.</p>
+
+  <h2>Verifying Everything Works</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Test</th>
+        <th>Command</th>
+        <th>Expected</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>HTTP request</td>
+        <td><code>curl -x http://localhost:9080 http://httpbin.org/get</code></td>
+        <td>Response returned; entry appears in dashboard</td>
+      </tr>
+      <tr>
+        <td>POST with body</td>
+        <td><code>curl -x http://localhost:9080 -X POST -d '{"a":1}' -H "Content-Type: application/json" http://httpbin.org/post</code></td>
+        <td>Request body visible in dashboard detail panel</td>
+      </tr>
+      <tr>
+        <td>HTTPS request</td>
+        <td><code>curl -x http://localhost:9080 https://httpbin.org/get</code></td>
+        <td>Decrypted content visible (after CA trust)</td>
+      </tr>
+      <tr>
+        <td>Dashboard status</td>
+        <td>Open <code>http://localhost:9081</code></td>
+        <td>Status bar shows "Connected", request count updates</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-nav">
+    <a href="index.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Overview</span>
+    </a>
+    <a href="certificates.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">TLS &amp; Certificates &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

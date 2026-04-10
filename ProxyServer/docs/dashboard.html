@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Guide - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html" class="active">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> Dashboard Guide</div>
+
+  <h1>Dashboard Guide
+    <span class="subtitle">Navigating the real-time traffic inspector</span>
+  </h1>
+
+  <p>The dashboard at <code>http://localhost:9081</code> is where you view and interact with captured traffic. It updates in real time via WebSocket — no polling, no refresh needed.</p>
+
+  <h2>Layout Overview</h2>
+
+  <div class="diagram">┌──────────────────────────────────────────────────────────────┐
+│ <span class="hl">Topbar</span>                                                       │
+│  ProxyServer    [Intercept: OFF] [Rules] [Save] [Load] [HAR] [Clear] │
+├──────────────────────────────────────────────────────────────┤
+│ <span class="hl-yellow">Filter Bar</span>                                                     │
+│  [All Methods ▼] [All Status ▼] [Filter URL...     ] [All Types ▼]  │
+├──────────────────────────┬───────────────────────────────────┤
+│ <span class="hl-cyan">Traffic List</span> (40%)         │ <span class="hl-green">Detail Panel</span> (60%)                  │
+│                          │                                   │
+│ #  Method Status Host... │  [Request] [Response]             │
+│ ─────────────────────── │  ┌─────────────────────────────┐  │
+│ 1  GET    200  api.ex.. │  │ General                     │  │
+│ 2  POST   201  api.ex.. │  │   Method: GET               │  │
+│ 3  GET    304  cdn.ex.. │  │   URL: https://...          │  │
+│ <span class="hl-accent">4  PUT    200  api.ex..</span> │  ├─────────────────────────────┤  │
+│ 5  GET    404  api.ex.. │  │ Headers ▼                   │  │
+│                          │  │   content-type: app/json   │  │
+│                          │  ├─────────────────────────────┤  │
+│                          │  │ Body                        │  │
+│                          │  │   { "user": "admin", ... }  │  │
+│                          │  └─────────────────────────────┘  │
+├──────────────────────────┴───────────────────────────────────┤
+│ <span class="hl-orange">Status Bar</span>                                                     │
+│  Connected    47 requests    Intercept queue: 0              │
+└──────────────────────────────────────────────────────────────┘
+                                              ┌─────────────────┐
+                                              │ <span class="hl">AI Chat</span> (overlay)│
+                                              │                 │
+                                              └─────────────────┘</div>
+
+  <h2>Topbar Controls</h2>
+
+  <table>
+    <thead><tr><th>Button</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Intercept: OFF/ON</strong></td><td>Toggle request/response interception globally. When ON and a rule matches, requests pause for your review.</td></tr>
+      <tr><td><strong>Rules</strong></td><td>Open the rules modal to manage intercept rules (add, enable/disable, delete).</td></tr>
+      <tr><td><strong>Save</strong></td><td>Save all current traffic to a JSON file in <code>sessions/</code>.</td></tr>
+      <tr><td><strong>Load</strong></td><td>Load a previously saved session, replacing current traffic.</td></tr>
+      <tr><td><strong>Export HAR</strong></td><td>Download traffic as a HAR 1.2 file, importable by Chrome DevTools and other tools.</td></tr>
+      <tr><td><strong>Clear</strong></td><td>Delete all captured traffic (irreversible).</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Traffic List</h2>
+
+  <p>The left panel shows a scrolling list of all captured requests. Each row displays:</p>
+
+  <table>
+    <thead><tr><th>Column</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>#</strong></td><td>Sequence number — monotonically increasing, never reused</td></tr>
+      <tr><td><strong>Method</strong></td><td>HTTP method (GET, POST, PUT, DELETE, etc.)</td></tr>
+      <tr><td><strong>Status</strong></td><td>Response status code, color-coded: <span class="badge badge-green">2xx</span> <span class="badge badge-cyan">3xx</span> <span class="badge badge-yellow">4xx</span> <span class="badge badge-red">5xx</span></td></tr>
+      <tr><td><strong>Host</strong></td><td>Target hostname</td></tr>
+      <tr><td><strong>Path</strong></td><td>URL path + query string</td></tr>
+      <tr><td><strong>Type</strong></td><td>Short content-type: JSON, HTML, JS, CSS, IMG, XML</td></tr>
+      <tr><td><strong>Size</strong></td><td>Response body size (B, K, M)</td></tr>
+      <tr><td><strong>Time</strong></td><td>Total request duration in milliseconds</td></tr>
+    </tbody>
+  </table>
+
+  <p>An <span class="badge badge-accent">h2</span> badge appears next to the status code when the upstream server responded via HTTP/2.</p>
+
+  <h3>Row States</h3>
+  <ul>
+    <li><strong>Normal</strong> — Default appearance</li>
+    <li><strong>Selected</strong> — Highlighted with accent color, detail panel shows its data</li>
+    <li><strong>Intercepted</strong> — Yellow-tinted background, waiting for your Forward/Drop decision</li>
+    <li><strong>Error</strong> — Red text, upstream connection failed</li>
+  </ul>
+
+  <h2>Filtering</h2>
+
+  <p>The filter bar lets you narrow down the traffic list. Filters combine with AND logic:</p>
+
+  <table>
+    <thead><tr><th>Filter</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Method</strong></td><td>Dropdown</td><td>Show only a specific HTTP method</td></tr>
+      <tr><td><strong>Status</strong></td><td>Dropdown</td><td>Filter by status code range (2xx, 3xx, 4xx, 5xx)</td></tr>
+      <tr><td><strong>URL</strong></td><td>Text input</td><td>Substring search on the full URL (case-insensitive)</td></tr>
+      <tr><td><strong>Content-Type</strong></td><td>Dropdown</td><td>Filter by response content type</td></tr>
+    </tbody>
+  </table>
+
+  <div class="info-box tip">
+    <strong>Tip:</strong> Press <code>f</code> to focus the URL filter input. Filtering happens in real time with a 150ms debounce.
+  </div>
+
+  <h2>Detail Panel</h2>
+
+  <p>Click any row to see its full details in the right panel. The panel has two tabs:</p>
+
+  <h3>Request Tab</h3>
+  <ul>
+    <li><strong>General</strong> — Method, full URL, HTTP version, client address, target server</li>
+    <li><strong>Headers</strong> — All request headers (collapsible). Click "copy" to copy a header value.</li>
+    <li><strong>Body</strong> — Request body, rendered based on content type</li>
+  </ul>
+
+  <h3>Response Tab</h3>
+  <ul>
+    <li><strong>General</strong> — Status code + message, protocol version, content type, duration, TTFB</li>
+    <li><strong>Headers</strong> — All response headers (collapsible)</li>
+    <li><strong>Body</strong> — Response body, rendered based on content type</li>
+  </ul>
+
+  <h3>Body Rendering</h3>
+
+  <table>
+    <thead><tr><th>Content-Type</th><th>Rendering</th></tr></thead>
+    <tbody>
+      <tr><td><code>application/json</code></td><td>Pretty-printed with syntax highlighting and collapsible tree nodes</td></tr>
+      <tr><td><code>text/html</code></td><td>Syntax highlighted (tags, attributes, strings)</td></tr>
+      <tr><td><code>application/javascript</code></td><td>Syntax highlighted (keywords, strings, comments, numbers)</td></tr>
+      <tr><td><code>text/css</code></td><td>Syntax highlighted (properties, colors, comments)</td></tr>
+      <tr><td><code>image/*</code></td><td>Inline image preview</td></tr>
+      <tr><td>Other text types</td><td>Plain preformatted text</td></tr>
+      <tr><td>Binary / unknown</td><td>Hex dump with ASCII sidebar (16 bytes per row, max 2KB shown)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="info-box note">
+    <strong>Compressed bodies are auto-decompressed.</strong> Gzip, deflate, and brotli responses are decompressed before display, so you always see the readable content.
+  </div>
+
+  <h2>Keyboard Shortcuts</h2>
+
+  <table>
+    <thead><tr><th>Key</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>j</code></td><td>Select next request in the list</td></tr>
+      <tr><td><code>k</code></td><td>Select previous request in the list</td></tr>
+      <tr><td><code>f</code></td><td>Focus the URL filter input</td></tr>
+      <tr><td><code>i</code></td><td>Toggle intercept on/off</td></tr>
+      <tr><td><code>Esc</code></td><td>Close any open modal</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Sessions &amp; Export</h2>
+
+  <h3>Saving Sessions</h3>
+  <p>Click <strong>Save</strong> to write all current traffic to a JSON file in the <code>sessions/</code> directory. The filename includes a timestamp: <code>session-2026-03-31T14-30-00.json</code>.</p>
+
+  <h3>Loading Sessions</h3>
+  <p>Click <strong>Load</strong> to see a list of saved sessions. Pick one to replace the current traffic list with the saved data. This clears existing traffic.</p>
+
+  <h3>HAR Export</h3>
+  <p>Click <strong>Export HAR</strong> to download a <a href="http://www.softwareishard.com/blog/har-12-spec/">HAR 1.2</a> file. This format is understood by Chrome DevTools (Network tab &gt; Import), <a href="https://toolbox.googleapps.com/apps/har_analyzer/">Google HAR Analyzer</a>, and many other tools.</p>
+
+  <h2>Status Bar</h2>
+
+  <table>
+    <thead><tr><th>Indicator</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Connected</strong> / <strong>Disconnected</strong></td><td>WebSocket connection to server. Auto-reconnects every 2 seconds.</td></tr>
+      <tr><td><strong>N requests</strong></td><td>Total number of traffic entries in the store</td></tr>
+      <tr><td><strong>Intercept queue: N</strong></td><td>Number of requests currently held, waiting for Forward/Drop</td></tr>
+    </tbody>
+  </table>
+
+  <div class="page-nav">
+    <a href="certificates.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; TLS &amp; Certificates</span>
+    </a>
+    <a href="interception.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">Intercept &amp; Modify &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

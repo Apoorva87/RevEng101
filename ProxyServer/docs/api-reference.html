@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Reference - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html" class="active">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> API Reference</div>
+
+  <h1>API Reference
+    <span class="subtitle">REST endpoints and WebSocket protocol</span>
+  </h1>
+
+  <p>All REST endpoints are served by the dashboard on <code>:9081</code>. All requests and responses use <code>Content-Type: application/json</code>.</p>
+
+  <h2>Traffic API</h2>
+
+  <h3>GET /api/traffic</h3>
+  <p>List all captured traffic as an array of summary objects.</p>
+  <pre><code><span class="fn">curl</span> http://localhost:9081/api/traffic</code></pre>
+  <p><strong>Response:</strong></p>
+  <pre><code>[
+  {
+    <span class="str">"id"</span>: <span class="str">"a1b2c3d4-..."</span>,
+    <span class="str">"seq"</span>: <span class="num">1</span>,
+    <span class="str">"state"</span>: <span class="str">"completed"</span>,
+    <span class="str">"method"</span>: <span class="str">"GET"</span>,
+    <span class="str">"url"</span>: <span class="str">"https://example.com/api/users"</span>,
+    <span class="str">"statusCode"</span>: <span class="num">200</span>,
+    <span class="str">"contentType"</span>: <span class="str">"application/json"</span>,
+    <span class="str">"host"</span>: <span class="str">"example.com"</span>,
+    <span class="str">"duration"</span>: <span class="num">142</span>,
+    <span class="str">"requestBodySize"</span>: <span class="num">0</span>,
+    <span class="str">"responseBodySize"</span>: <span class="num">1024</span>,
+    <span class="str">"responseHttpVersion"</span>: <span class="str">"2"</span>,
+    <span class="str">"intercept"</span>: { <span class="str">"wasIntercepted"</span>: <span class="kw">false</span>, ... }
+  },
+  ...
+]</code></pre>
+
+  <h3>GET /api/traffic/:id</h3>
+  <p>Full detail for a single entry, including base64-encoded bodies.</p>
+  <pre><code><span class="fn">curl</span> http://localhost:9081/api/traffic/a1b2c3d4-...</code></pre>
+  <p><strong>Response:</strong> Full <code>TrafficEntry.toJSON()</code> object with request/response headers, base64 bodies, timing, target info, and intercept metadata.</p>
+
+  <h3>DELETE /api/traffic</h3>
+  <p>Clear all captured traffic.</p>
+  <pre><code><span class="fn">curl</span> -X DELETE http://localhost:9081/api/traffic</code></pre>
+
+  <h3>POST /api/traffic/:id/forward</h3>
+  <p>Forward an intercepted request, optionally with modifications.</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/traffic/ID/forward \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "method": "PUT",
+    "path": "/api/v2/users",
+    "headers": { "x-custom": "value" },
+    "body": "{\"modified\": true}"
+  }'</span></code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>method</code></td><td>string</td><td>Override the HTTP method</td></tr>
+      <tr><td><code>path</code></td><td>string</td><td>Override the request path</td></tr>
+      <tr><td><code>headers</code></td><td>object</td><td>Replace all request headers</td></tr>
+      <tr><td><code>body</code></td><td>string</td><td>Override the request body</td></tr>
+    </tbody>
+  </table>
+  <p>All fields are optional. Send <code>{}</code> to forward without modifications.</p>
+
+  <h3>POST /api/traffic/:id/drop</h3>
+  <p>Drop an intercepted request. The client receives a 502.</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/traffic/ID/drop</code></pre>
+
+  <h3>POST /api/traffic/:id/forward-response</h3>
+  <p>Forward an intercepted response, optionally with modifications.</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/traffic/ID/forward-response \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{ "statusCode": 404, "body": "{\"error\": \"not found\"}" }'</span></code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>statusCode</code></td><td>number</td><td>Override the response status code</td></tr>
+      <tr><td><code>headers</code></td><td>object</td><td>Replace all response headers</td></tr>
+      <tr><td><code>body</code></td><td>string</td><td>Override the response body</td></tr>
+    </tbody>
+  </table>
+
+  <h3>POST /api/traffic/:id/drop-response</h3>
+  <p>Drop an intercepted response. The client receives a 502.</p>
+
+  <h2>Intercept API</h2>
+
+  <h3>GET /api/intercept</h3>
+  <p>Check if interception is enabled.</p>
+  <pre><code><span class="fn">curl</span> http://localhost:9081/api/intercept</code></pre>
+  <p><strong>Response:</strong></p>
+  <pre><code>{ <span class="str">"requestEnabled"</span>: <span class="kw">false</span>, <span class="str">"responseEnabled"</span>: <span class="kw">false</span> }</code></pre>
+
+  <h3>POST /api/intercept</h3>
+  <p>Toggle interception on or off (both request and response).</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/intercept \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{ "enabled": true }'</span></code></pre>
+
+  <h2>Rules API</h2>
+
+  <h3>GET /api/rules</h3>
+  <p>List all intercept rules.</p>
+  <pre><code><span class="fn">curl</span> http://localhost:9081/api/rules</code></pre>
+  <p><strong>Response:</strong></p>
+  <pre><code>[
+  {
+    <span class="str">"id"</span>: <span class="str">"uuid..."</span>,
+    <span class="str">"enabled"</span>: <span class="kw">true</span>,
+    <span class="str">"urlPattern"</span>: <span class="str">"*api*"</span>,
+    <span class="str">"method"</span>: <span class="str">"POST"</span>,
+    <span class="str">"contentType"</span>: <span class="str">""</span>,
+    <span class="str">"headerKey"</span>: <span class="str">""</span>,
+    <span class="str">"headerValue"</span>: <span class="str">""</span>,
+    <span class="str">"direction"</span>: <span class="str">"request"</span>,
+    <span class="str">"createdAt"</span>: <span class="num">1711900000000</span>
+  }
+]</code></pre>
+
+  <h3>POST /api/rules</h3>
+  <p>Create a new rule.</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/rules \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "urlPattern": "*login*",
+    "method": "POST",
+    "direction": "request"
+  }'</span></code></pre>
+  <p>Returns <code>201</code> with the full rule object (including generated <code>id</code>).</p>
+
+  <h3>PUT /api/rules/:id</h3>
+  <p>Update a rule.</p>
+  <pre><code><span class="fn">curl</span> -X PUT http://localhost:9081/api/rules/UUID \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{ "enabled": false }'</span></code></pre>
+
+  <h3>DELETE /api/rules/:id</h3>
+  <p>Delete a rule.</p>
+  <pre><code><span class="fn">curl</span> -X DELETE http://localhost:9081/api/rules/UUID</code></pre>
+
+  <h2>Sessions &amp; Export API</h2>
+
+  <h3>GET /api/sessions</h3>
+  <p>List saved session filenames.</p>
+  <pre><code>[ <span class="str">"session-2026-03-31T14-30-00.json"</span>, ... ]</code></pre>
+
+  <h3>POST /api/sessions</h3>
+  <p>Save current traffic to a JSON file.</p>
+  <pre><code>{ <span class="str">"file"</span>: <span class="str">"session-2026-03-31T14-30-00.json"</span> }</code></pre>
+
+  <h3>POST /api/sessions/:filename/load</h3>
+  <p>Load a saved session. Clears current traffic and replaces it with the session data.</p>
+
+  <h3>GET /api/export/har</h3>
+  <p>Download all traffic as a HAR 1.2 file.</p>
+  <pre><code><span class="fn">curl</span> -o capture.har http://localhost:9081/api/export/har</code></pre>
+
+  <h2>Chat API</h2>
+
+  <h3>GET /api/chat/status</h3>
+  <p>Check if the AI chat agent is available.</p>
+  <pre><code>{ <span class="str">"available"</span>: <span class="kw">true</span>, <span class="str">"sessionActive"</span>: <span class="kw">false</span>, <span class="str">"tokenEstimate"</span>: <span class="num">1500</span> }</code></pre>
+
+  <h3>POST /api/chat/browser-context</h3>
+  <p>Send browser cookies and localStorage from the extension.</p>
+  <pre><code><span class="fn">curl</span> -X POST http://localhost:9081/api/chat/browser-context \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{ "url": "https://example.com", "cookies": [...], "localStorage": {...} }'</span></code></pre>
+
+  <h2>WebSocket Protocol</h2>
+
+  <p>Connect to <code>ws://localhost:9081</code>. All messages are JSON objects with a <code>type</code> field.</p>
+
+  <h3>Server → Client (Traffic)</h3>
+
+  <table>
+    <thead><tr><th>Type</th><th>Payload</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>init</code></td><td><code>{ count }</code></td><td>Sent on connection — current entry count</td></tr>
+      <tr><td><code>add</code></td><td><code>{ entry }</code></td><td>New traffic entry (summary format)</td></tr>
+      <tr><td><code>update</code></td><td><code>{ entry }</code></td><td>Updated traffic entry (summary format)</td></tr>
+      <tr><td><code>clear</code></td><td><em>none</em></td><td>All traffic cleared</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Client → Server (Chat)</h3>
+
+  <table>
+    <thead><tr><th>Type</th><th>Payload</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>chat:send</code></td><td><code>{ messageId, text, selectedEntryId?, contextToggles }</code></td><td>Send a user message to the AI</td></tr>
+      <tr><td><code>chat:reset</code></td><td><code>{ messageId }</code></td><td>Clear conversation history</td></tr>
+      <tr><td><code>chat:compact</code></td><td><code>{ messageId }</code></td><td>Summarize and compress context</td></tr>
+      <tr><td><code>chat:context-toggle</code></td><td><code>{ toggles }</code></td><td>Update which context blocks the AI sees</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Server → Client (Chat)</h3>
+
+  <table>
+    <thead><tr><th>Type</th><th>Payload</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>chat:status</code></td><td><code>{ available, sessionActive, contextToggles, tokenEstimate, breakdown }</code></td><td>Sent on connect + toggle changes</td></tr>
+      <tr><td><code>chat:chunk</code></td><td><code>{ messageId, text, done: false }</code></td><td>Streaming text from Claude</td></tr>
+      <tr><td><code>chat:done</code></td><td><code>{ messageId, fullText, tokenEstimate }</code></td><td>Response complete</td></tr>
+      <tr><td><code>chat:error</code></td><td><code>{ messageId, error }</code></td><td>Error (CLI not found, crash, etc.)</td></tr>
+      <tr><td><code>chat:action</code></td><td><code>{ messageId, action, detail }</code></td><td>Claude using a tool (for thinking indicator)</td></tr>
+      <tr><td><code>chat:reset-ack</code></td><td><code>{ messageId }</code></td><td>Reset confirmed</td></tr>
+      <tr><td><code>chat:compact-ack</code></td><td><code>{ messageId, summary }</code></td><td>Compact confirmed with summary</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Error Responses</h2>
+
+  <p>All API errors return JSON:</p>
+
+  <table>
+    <thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead>
+    <tbody>
+      <tr><td><code>400</code></td><td><code>{ "error": "Invalid JSON" }</code></td><td>Malformed request body</td></tr>
+      <tr><td><code>404</code></td><td><code>{ "error": "Not found" }</code></td><td>Unknown endpoint or missing entry/rule</td></tr>
+    </tbody>
+  </table>
+
+  <p>Success responses return <code>200</code> with <code>{ "ok": true }</code> for actions, or the requested data for queries.</p>
+
+  <div class="page-nav">
+    <a href="request-lifecycle.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Request Lifecycle</span>
+    </a>
+    <div></div>
+  </div>
+</main>
+
+</body>
+</html>

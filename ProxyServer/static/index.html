@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProxyServer</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="topbar-left">
+      <span class="logo">ProxyServer</span>
+    </div>
+    <div class="topbar-right">
+      <button id="btn-intercept" class="btn btn-toggle" data-active="false">Intercept: OFF</button>
+      <button id="btn-rules" class="btn">Rules</button>
+      <button id="btn-save" class="btn">Save</button>
+      <button id="btn-load" class="btn">Load</button>
+      <button id="btn-export-har" class="btn">Export HAR</button>
+      <button id="btn-clear" class="btn btn-danger">Clear</button>
+    </div>
+  </header>
+
+  <div id="filter-bar">
+    <select id="filter-method">
+      <option value="">All Methods</option>
+      <option>GET</option>
+      <option>POST</option>
+      <option>PUT</option>
+      <option>DELETE</option>
+      <option>PATCH</option>
+      <option>HEAD</option>
+      <option>OPTIONS</option>
+    </select>
+    <select id="filter-status">
+      <option value="">All Status</option>
+      <option value="2xx">2xx</option>
+      <option value="3xx">3xx</option>
+      <option value="4xx">4xx</option>
+      <option value="5xx">5xx</option>
+    </select>
+    <input type="text" id="filter-url" placeholder="Filter URL...">
+    <select id="filter-content-type">
+      <option value="">All Types</option>
+      <option value="json">JSON</option>
+      <option value="html">HTML</option>
+      <option value="javascript">JavaScript</option>
+      <option value="css">CSS</option>
+      <option value="image">Image</option>
+      <option value="xml">XML</option>
+    </select>
+  </div>
+
+  <div id="main">
+    <div id="traffic-list">
+      <table id="traffic-table">
+        <thead>
+          <tr>
+            <th class="col-seq">#</th>
+            <th class="col-method">Method</th>
+            <th class="col-status">Status</th>
+            <th class="col-host">Host</th>
+            <th class="col-path">Path</th>
+            <th class="col-type">Type</th>
+            <th class="col-size">Size</th>
+            <th class="col-time">Time</th>
+          </tr>
+        </thead>
+        <tbody id="traffic-tbody"></tbody>
+      </table>
+    </div>
+    <div id="h-splitter" class="splitter splitter-h"></div>
+    <div id="detail-panel">
+      <div id="detail-empty">
+        <p>Select a request to view details</p>
+      </div>
+      <div id="detail-content" class="hidden">
+        <div id="detail-tabs">
+          <button class="tab active" data-tab="request">Request</button>
+          <button class="tab" data-tab="response">Response</button>
+        </div>
+        <div id="detail-body">
+          <div id="tab-request" class="tab-pane active">
+            <section class="detail-section">
+              <h3>General</h3>
+              <div id="req-general" class="kv-table"></div>
+            </section>
+            <section class="detail-section collapsible">
+              <h3 class="collapsible-header">Headers <span class="chevron">&#9660;</span></h3>
+              <div id="req-headers" class="kv-table collapsible-body"></div>
+            </section>
+            <section class="detail-section">
+              <h3>Body</h3>
+              <div id="req-body" class="body-view"></div>
+            </section>
+          </div>
+          <div id="tab-response" class="tab-pane hidden">
+            <section class="detail-section">
+              <h3>General</h3>
+              <div id="res-general" class="kv-table"></div>
+            </section>
+            <section class="detail-section collapsible">
+              <h3 class="collapsible-header">Headers <span class="chevron">&#9660;</span></h3>
+              <div id="res-headers" class="kv-table collapsible-body"></div>
+            </section>
+            <section class="detail-section">
+              <h3>Body</h3>
+              <div id="res-body" class="body-view"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="v-splitter" class="splitter splitter-v"></div>
+  <div id="chat-container"></div>
+
+  <footer id="statusbar">
+    <span id="status-connection">Connecting...</span>
+    <span id="status-count">0 requests</span>
+    <span id="status-intercept">Intercept queue: 0</span>
+  </footer>
+
+  <!-- Rules modal -->
+  <div id="rules-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Intercept Rules</h2>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="rules-list"></div>
+        <button id="btn-add-rule" class="btn btn-primary">Add Rule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Intercept edit modal -->
+  <div id="intercept-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <h2>Intercepted Request</h2>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="intercept-field">
+          <label>Method</label>
+          <input type="text" id="intercept-method">
+        </div>
+        <div class="intercept-field">
+          <label>URL</label>
+          <input type="text" id="intercept-url">
+        </div>
+        <div class="intercept-field">
+          <label>Headers (JSON)</label>
+          <textarea id="intercept-headers" rows="6"></textarea>
+        </div>
+        <div class="intercept-field">
+          <label>Body</label>
+          <textarea id="intercept-body" rows="8"></textarea>
+        </div>
+        <div class="intercept-actions">
+          <button id="btn-forward" class="btn btn-primary">Forward</button>
+          <button id="btn-drop" class="btn btn-danger">Drop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <script src="app.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

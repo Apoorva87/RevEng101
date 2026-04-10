@@ -1,0 +1,24 @@
+[
+  {
+    "id": "a21f4b85-1f6a-46b7-82ea-f3e2a833685e",
+    "enabled": true,
+    "urlPattern": "*api*",
+    "method": "x-traffic-zone",
+    "contentType": "",
+    "headerKey": "",
+    "headerValue": "",
+    "direction": "response",
+    "createdAt": 1775165785359
+  },
+  {
+    "id": "00dc2e32-64c0-4653-8931-853a916378f8",
+    "enabled": true,
+    "urlPattern": "aoml.com",
+    "method": "*",
+    "contentType": "",
+    "headerKey": "",
+    "headerValue": "",
+    "direction": "request",
+    "createdAt": 1775165804371
+  }
+]

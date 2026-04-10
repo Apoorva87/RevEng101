@@ -1,0 +1,13 @@
+{
+  "name": "proxy-server",
+  "version": "1.0.0",
+  "description": "HTTP forward proxy with real-time web dashboard for reverse engineering and debugging",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "node-forge": "^1.3.1"
+  }
+}

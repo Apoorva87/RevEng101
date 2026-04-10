@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Request Lifecycle - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html" class="active">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> Request Lifecycle</div>
+
+  <h1>Request Lifecycle
+    <span class="subtitle">Step-by-step flow from client to server and back</span>
+  </h1>
+
+  <p>This page traces a single request through every stage of ProxyServer, from the moment a client sends it to when the response arrives back. We'll cover both HTTP and HTTPS paths.</p>
+
+  <h2>HTTP Request Flow</h2>
+
+  <p>When a client sends a plain HTTP request through the proxy:</p>
+
+  <div class="diagram"><span class="hl-cyan">Client</span>                    <span class="hl">ProxyServer</span>                     <span class="hl-green">Upstream</span>
+
+  GET http://example.com/api ──►
+                              │
+                         ① <span class="hl-yellow">Create TrafficEntry</span>
+                              state: <span class="badge badge-cyan">pending</span>
+                              trafficStore.add(entry)
+                              │
+                         ② <span class="hl-yellow">Collect request body</span>
+                              Buffer chunks, cap at 2MB
+                              entry.setRequestBody(buf)
+                              │
+                         ③ <span class="hl-yellow">Request intercept check</span>
+                              │
+                    ┌─────────┴──────────────────┐
+                    │                            │
+              No rule match                 Rule matches
+              (or intercept OFF)            + intercept ON
+                    │                            │
+                    │                       state: <span class="badge badge-yellow">intercepted</span>
+                    │                       phase: 'request'
+                    │                            │
+                    │                       Dashboard modal
+                    │                       User: Forward/Drop
+                    │                            │
+                    ├────────────────────────────┘
+                    │
+               ④ <span class="hl-yellow">Forward to upstream</span>
+                    state: <span class="badge badge-accent">forwarded</span>
+                    │
+                    │── HTTP request ──────────────►
+                    │                              │
+                    │◄── HTTP response ────────────│
+                    │
+               ⑤ <span class="hl-yellow">Buffer full response</span>
+                    Decompress gzip/br/deflate
+                    entry.setResponse(...)
+                    entry.setResponseBody(buf)
+                    │
+               ⑥ <span class="hl-yellow">Response intercept check</span>
+                    │
+                    (same pattern as request)
+                    │
+               ⑦ <span class="hl-yellow">Forward response to client</span>
+                    state: <span class="badge badge-green">completed</span>
+                    │
+  ◄── HTTP response ─┘
+                    │
+               ⑧ <span class="hl-yellow">WSBridge broadcasts update</span>
+                    Dashboard UI updates in real time</div>
+
+  <h3>Key Points</h3>
+  <ul>
+    <li>The proxy requires <strong>absolute-URI</strong> format (e.g., <code>GET http://example.com/path</code>) — this is the standard for forward proxies per HTTP/1.1 spec</li>
+    <li>Proxy-specific headers (<code>proxy-connection</code>, <code>proxy-authorization</code>) are stripped before forwarding</li>
+    <li>Body decompression happens for <em>display</em> only — the original compressed bytes are forwarded to the client</li>
+    <li>Every state change calls <code>trafficStore.update(entry.id)</code> which triggers a WebSocket broadcast</li>
+  </ul>
+
+  <h2>HTTPS Request Flow</h2>
+
+  <p>HTTPS adds a TLS layer with certificate generation:</p>
+
+  <div class="diagram"><span class="hl-cyan">Client</span>              <span class="hl">ProxyServer</span>                       <span class="hl-green">Upstream</span>
+
+  CONNECT example.com:443 ──►
+                          │
+                     ① <span class="hl-orange">CONNECT handler</span>
+                          Delegates to TLSHandler
+                          │
+  ◄── 200 Established ────│
+                          │
+  ══ <span class="hl-yellow">TLS Handshake</span> ═══════│
+     Client ↔ Proxy        │
+     Proxy presents cert   ② <span class="hl-orange">CertManager.getHostCert("example.com")</span>
+     signed by our CA         Check memory cache → disk cache → generate
+                          │
+  ── GET /api (encrypted) ►│
+                          │
+                     ③ <span class="hl-orange">HTTPStreamParser.readRequest()</span>
+                          Reads headers until \r\n\r\n
+                          Reads body per Content-Length or chunked
+                          │
+                     ④ <span class="hl-yellow">Create TrafficEntry</span>
+                          URL: https://example.com/api
+                          protocol: 'https'
+                          trafficStore.add(entry)
+                          │
+                     ⑤ <span class="hl-yellow">Request intercept check</span>
+                          (same as HTTP flow)
+                          │
+                     ⑥ <span class="hl-orange">Try HTTP/2 upstream</span>
+                          │
+                ┌─────────┴──────────┐
+                │                    │
+          <span class="hl-green">H2 ALPN success</span>        <span class="hl-yellow">H2 fail → H1 fallback</span>
+           http2.connect()       tls.connect()
+           :method, :path       GET /api HTTP/1.1
+                │                    │
+                ├────────────────────┘
+                │
+                │──── request ──────────────────────►
+                │                                    │
+                │◄─── response ─────────────────────│
+                │
+           ⑦ <span class="hl-yellow">Process response</span>
+                Decompress, capture body
+                entry.setResponse(...)
+                │
+           ⑧ <span class="hl-yellow">Response intercept check</span>
+                │
+           ⑨ <span class="hl-orange">_writeHTTP1Response()</span>
+                Translate H2 → H1 if needed
+                Strip pseudo-headers (:status, etc.)
+                Set content-length
+                │
+  ◄── response (encrypted) ─│
+                │
+           ⑩ <span class="hl-orange">Keep-alive loop</span>
+                If Connection: close → end tunnel
+                Else → processNextRequest()</div>
+
+  <h3>Key Differences from HTTP</h3>
+  <ul>
+    <li><strong>CONNECT tunnel</strong> — The client first opens a raw TCP tunnel via <code>CONNECT</code>, then does TLS inside it</li>
+    <li><strong>Certificate generation</strong> — A unique cert is generated (or cached) for each hostname</li>
+    <li><strong>Two TLS sessions</strong> — Client↔Proxy and Proxy↔Upstream are separate encrypted channels</li>
+    <li><strong>HTTP/2 upstream</strong> — The proxy tries H2 first via ALPN negotiation. An <code>h2</code> badge appears in the dashboard for H2 responses</li>
+    <li><strong>Keep-alive</strong> — Multiple requests can flow over a single CONNECT tunnel. The <code>HTTPStreamParser</code> reads one request at a time and loops</li>
+    <li><strong>H2→H1 translation</strong> — HTTP/2 pseudo-headers (<code>:status</code>, <code>:method</code>) are stripped and the response is reconstructed as HTTP/1.1 for the client</li>
+  </ul>
+
+  <h2>TrafficEntry State Machine</h2>
+
+  <div class="diagram">                  ┌─────────────────────────────────────────────┐
+                  │                                             │
+            <span class="badge badge-cyan">pending</span> ─────────────────────────────────────── │ ──► <span class="badge badge-red">error</span>
+                  │                                             │    (upstream fail)
+                  ├─── rule match + intercept ON                │
+                  │                                             │
+            <span class="badge badge-yellow">intercepted</span>                                        │
+                  │                                             │
+              ┌───┴───┐                                        │
+              │       │                                        │
+          Forward   Drop ────────────────────────────────── │ ──► <span class="badge badge-red">aborted</span>
+              │                                                │
+            <span class="badge badge-accent">forwarded</span>                                          │
+              │                                                │
+              ├─── response received + response rule match     │
+              │                                                │
+            <span class="badge badge-yellow">intercepted</span>  (phase: 'response')                    │
+              │                                                │
+              ├─── Forward                                     │
+              │                                                │
+            <span class="badge badge-green">completed</span> ◄─────────────────────────────────────────┘
+              (timing.duration calculated)</div>
+
+  <h2>Timing Breakdown</h2>
+
+  <div class="diagram">  Client sends      Proxy forwards      Server responds      Client receives
+  request            to upstream          (first byte)         complete response
+     │                    │                    │                     │
+     ├────────────────────┤                    │                     │
+     │     <span class="hl-yellow">proxy overhead</span>  │                    │                     │
+     │                    ├────────────────────┤                     │
+     │                    │       <span class="hl-cyan">TTFB</span>         │                     │
+     │                    │ (time to first byte)│                     │
+     │                    │                    ├─────────────────────┤
+     │                    │                    │    <span class="hl-green">transfer time</span>     │
+     │                    │                    │                     │
+     ├────────────────────┴────────────────────┴─────────────────────┤
+     │                          <span class="hl">total duration</span>                        │
+     │                    timing.start → timing.end                  │</div>
+
+  <table>
+    <thead><tr><th>Field</th><th>Measured At</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>timing.start</code></td><td>TrafficEntry constructor</td><td>When the proxy first receives the request</td></tr>
+      <tr><td><code>timing.ttfb</code></td><td><code>setResponse()</code></td><td>Time from start to first byte of upstream response</td></tr>
+      <tr><td><code>timing.end</code></td><td><code>complete()</code> / <code>fail()</code></td><td>When the response has been fully forwarded to client</td></tr>
+      <tr><td><code>timing.duration</code></td><td>Calculated</td><td><code>end - start</code> in milliseconds</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Body Capture Limits</h2>
+
+  <p>Both request and response bodies are captured up to <strong>2MB</strong> (<code>TrafficEntry.MAX_BODY_CAPTURE = 2 * 1024 * 1024</code>). This limit applies only to what's stored for display in the dashboard — the full body is always forwarded to its destination regardless of size.</p>
+
+  <table>
+    <thead><tr><th>Scenario</th><th>Stored in Entry</th><th>Forwarded to Client/Server</th></tr></thead>
+    <tbody>
+      <tr><td>500KB JSON response</td><td>Full 500KB (decompressed)</td><td>Original bytes (possibly compressed)</td></tr>
+      <tr><td>10MB file download</td><td>First 2MB + <code>bodyTruncated: true</code></td><td>Full 10MB</td></tr>
+      <tr><td>Empty body</td><td><code>null</code></td><td>Nothing</td></tr>
+    </tbody>
+  </table>
+
+  <div class="page-nav">
+    <a href="architecture.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Architecture</span>
+    </a>
+    <a href="api-reference.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">API Reference &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

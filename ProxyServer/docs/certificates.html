@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TLS &amp; Certificates - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html" class="active">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> TLS &amp; Certificates</div>
+
+  <h1>TLS &amp; Certificates
+    <span class="subtitle">How HTTPS works and how ProxyServer decrypts it</span>
+  </h1>
+
+  <p>This guide explains TLS from first principles — what problem it solves, how certificates create trust, and how ProxyServer intercepts encrypted traffic by becoming a trusted man-in-the-middle.</p>
+
+  <h2>The Problem HTTPS Solves</h2>
+
+  <p>HTTP is plaintext. Anyone on the same network (a coffee shop, your ISP, a corporate firewall) can read your traffic:</p>
+
+  <div class="diagram"><span class="hl-red">HTTP (insecure):</span>
+
+  Browser ──── <span class="hl-red">"POST /login password=secret"</span> ────► Server
+                          │
+                    <span class="hl-red">Anyone can read this</span></div>
+
+  <p>HTTPS wraps HTTP inside TLS (Transport Layer Security), which provides two things:</p>
+
+  <ol>
+    <li><strong>Encryption</strong> — The data is scrambled so only the intended recipient can read it</li>
+    <li><strong>Authentication</strong> — You can verify you're talking to the real server, not an impersonator</li>
+  </ol>
+
+  <div class="diagram"><span class="hl-green">HTTPS (secure):</span>
+
+  Browser ══ <span class="hl-green">encrypted tunnel</span> ═════════════════════► Server
+                          │
+                    <span class="hl-green">Looks like random noise to anyone watching</span></div>
+
+  <h2>How TLS Certificates Work</h2>
+
+  <h3>What Is a Certificate?</h3>
+
+  <p>A TLS certificate is an electronic document (X.509 format) that binds a <strong>public key</strong> to a <strong>hostname</strong>. When you connect to <code>example.com</code>, the server sends its certificate which says "I am example.com, and here is my public key." Your browser uses the public key to set up an encrypted channel.</p>
+
+  <p>A certificate contains:</p>
+
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Example</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Subject</code></td><td><code>CN=example.com</code></td><td>Who this certificate belongs to</td></tr>
+      <tr><td><code>Issuer</code></td><td><code>CN=DigiCert</code></td><td>Who vouches for this certificate</td></tr>
+      <tr><td><code>Public Key</code></td><td>(2048-bit RSA)</td><td>Used to establish encrypted channel</td></tr>
+      <tr><td><code>SAN</code></td><td><code>DNS:example.com, DNS:www.example.com</code></td><td>All hostnames this cert is valid for</td></tr>
+      <tr><td><code>Validity</code></td><td><code>2024-01-01 to 2026-01-01</code></td><td>Expiration dates</td></tr>
+      <tr><td><code>Signature</code></td><td>(SHA-256 with RSA)</td><td>Cryptographic proof the issuer approved this</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The Chain of Trust</h3>
+
+  <p>How does your browser know to trust a certificate? Through a <strong>chain of trust</strong>:</p>
+
+  <div class="diagram"><span class="hl-orange">Root CA</span> (pre-installed in your OS/browser — DigiCert, Let's Encrypt, etc.)
+    │
+    │  signs
+    ▼
+<span class="hl-yellow">Intermediate CA</span> (optional — the issuing CA)
+    │
+    │  signs
+    ▼
+<span class="hl-green">Server Certificate</span> (example.com)  ← the one the server presents</div>
+
+  <ol>
+    <li>Your OS/browser ships with ~150 <strong>Root CAs</strong> pre-trusted</li>
+    <li>The server's certificate says "DigiCert signed me"</li>
+    <li>The browser finds DigiCert in its trusted root store</li>
+    <li>It verifies the cryptographic signature to confirm DigiCert actually signed it</li>
+    <li>If the chain is valid and the hostname matches, the browser shows the lock icon</li>
+  </ol>
+
+  <div class="info-box tip">
+    <strong>Key insight:</strong> Trust flows downward from root CAs. If you add a new root CA to your system, everything signed by that CA becomes trusted. This is exactly how ProxyServer works.
+  </div>
+
+  <h3>The TLS Handshake (Simplified)</h3>
+
+  <div class="diagram"><span class="hl-cyan">Browser</span>                                         <span class="hl-green">Server</span>
+   │                                               │
+   │── ClientHello (TLS version, ciphers) ────────►│
+   │                                               │
+   │◄── ServerHello (chosen cipher) + Certificate ─│
+   │                                               │
+   │  <span class="hl-yellow">[Browser verifies certificate chain]</span>          │
+   │  <span class="hl-yellow">[Browser checks hostname matches SAN]</span>          │
+   │  <span class="hl-yellow">[Browser checks certificate not expired]</span>        │
+   │                                               │
+   │── Key Exchange (encrypted with server's ──────►│
+   │   public key)                                  │
+   │                                               │
+   │◄═══════ <span class="hl-green">Encrypted Channel Established</span> ═══════►│
+   │                                               │
+   │── GET /api/data (encrypted) ──────────────────►│
+   │◄── 200 OK + JSON body (encrypted) ────────────│</div>
+
+  <p>After the handshake, both sides have agreed on a shared secret key. All subsequent data is encrypted with this key.</p>
+
+  <h2>How MITM Interception Works</h2>
+
+  <p>ProxyServer intercepts HTTPS by creating <strong>two separate TLS sessions</strong>:</p>
+
+  <div class="diagram"><span class="hl-cyan">Browser</span>              <span class="hl">ProxyServer</span>               <span class="hl-green">Real Server</span>
+   │                      │                          │
+   │── CONNECT host:443 ─►│                          │
+   │◄── 200 Established ──│                          │
+   │                      │                          │
+   │ <span class="hl-yellow">═══ TLS Session 1 ═══</span> │                          │
+   │  (Browser ↔ Proxy)   │                          │
+   │  Proxy presents a    │                          │
+   │  <span class="hl-red">fake cert</span> for "host" │                          │
+   │  signed by <span class="hl-red">our CA</span>    │                          │
+   │                      │ <span class="hl-green">═══ TLS Session 2 ═══════</span> │
+   │                      │  (Proxy ↔ Real Server)    │
+   │                      │  Uses real server's cert  │
+   │                      │                          │
+   │── GET /path ────────►│                          │
+   │  (encrypted in S1)   │── GET /path ─────────────►│
+   │                      │  (encrypted in S2)        │
+   │                      │                          │
+   │                      │◄── 200 OK ───────────────│
+   │◄── 200 OK ──────────│                          │
+   │                      │                          │
+   │  <span class="hl-orange">Proxy sees plaintext between the two sessions</span>   │</div>
+
+  <h3>Step by Step</h3>
+
+  <ol class="steps">
+    <li>
+      <strong>CONNECT tunnel</strong>
+      <p>The browser sends <code>CONNECT example.com:443</code>. This is the HTTP method used to establish a tunnel through a proxy. ProxyServer responds with <code>200 Connection Established</code> — the tunnel is open.</p>
+    </li>
+    <li>
+      <strong>Proxy generates a fake certificate</strong>
+      <p>Instead of blindly tunneling bytes, ProxyServer intercepts the TLS handshake. It generates a certificate for <code>example.com</code> on the fly, signed by its own CA (<code>certs/ca.crt</code>). Because you've trusted this CA, the browser accepts the fake cert.</p>
+    </li>
+    <li>
+      <strong>Client-side TLS session</strong>
+      <p>The browser completes its TLS handshake with the proxy, thinking it's talking to <code>example.com</code>. Data flows encrypted between browser and proxy.</p>
+    </li>
+    <li>
+      <strong>Server-side TLS session</strong>
+      <p>The proxy opens a separate TLS connection to the real <code>example.com</code>. It tries HTTP/2 first (via ALPN negotiation), falling back to HTTP/1.1.</p>
+    </li>
+    <li>
+      <strong>Plaintext in the middle</strong>
+      <p>The proxy decrypts data from the browser, inspects it, logs it to TrafficStore, then re-encrypts and sends it to the real server (and vice versa for responses).</p>
+    </li>
+  </ol>
+
+  <h2>ProxyServer's Certificate System</h2>
+
+  <h3>CA Certificate Generation</h3>
+
+  <p>On first run, <code>CertManager</code> generates a self-signed root CA:</p>
+
+  <table>
+    <thead><tr><th>Property</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Algorithm</td><td>RSA 2048-bit</td></tr>
+      <tr><td>Common Name</td><td><code>ProxyServer CA</code></td></tr>
+      <tr><td>Validity</td><td>10 years</td></tr>
+      <tr><td>Extensions</td><td><code>basicConstraints: CA=true</code>, <code>keyUsage: keyCertSign</code></td></tr>
+      <tr><td>Files</td><td><code>certs/ca.key</code> (private key), <code>certs/ca.crt</code> (certificate)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="info-box danger">
+    <strong>Protect your CA private key.</strong> Anyone with <code>certs/ca.key</code> can generate certificates trusted by your system. Never share it. If compromised, remove the CA from your trust store and delete the <code>certs/</code> directory — a new CA will be generated on next run.
+  </div>
+
+  <h3>Per-Host Certificate Generation</h3>
+
+  <p>When you visit <code>example.com</code> through the proxy for the first time:</p>
+
+  <ol>
+    <li><code>CertManager.getHostCert("example.com")</code> is called</li>
+    <li>It checks the <strong>memory cache</strong> (Map) — cache miss</li>
+    <li>It checks the <strong>disk cache</strong> (<code>certs/hosts/example.com.key</code> / <code>.crt</code>) — cache miss</li>
+    <li>It <strong>generates</strong> a new 2048-bit RSA key pair</li>
+    <li>Creates a certificate with:
+      <ul>
+        <li>Subject: <code>CN=example.com</code></li>
+        <li>Issuer: the CA certificate's subject</li>
+        <li><strong>SAN</strong> (Subject Alternative Name): <code>DNS:example.com</code></li>
+        <li>Validity: 2 years</li>
+      </ul>
+    </li>
+    <li>Signs it with the CA's private key</li>
+    <li>Caches to disk and memory</li>
+  </ol>
+
+  <div class="info-box note">
+    <strong>Why SAN matters:</strong> Modern browsers (Chrome 58+, Firefox, Safari) require the Subject Alternative Name extension. They no longer check the Common Name (CN) field for hostname validation. Without a proper SAN, the browser will reject the certificate even if the CN matches.
+  </div>
+
+  <h3>Certificate Caching</h3>
+
+  <div class="diagram">Request for <span class="hl">example.com</span> cert:
+
+  ┌─────────────┐     hit     ┌──────────────┐
+  │ Memory Map  │ ───────────► <span class="hl-green">Return cached</span>  │
+  └──────┬──────┘             └──────────────┘
+         │ miss
+         ▼
+  ┌─────────────┐     hit     ┌──────────────┐
+  │ Disk Cache  │ ───────────► <span class="hl-green">Load → memory</span>  │
+  │ certs/hosts/│             │ <span class="hl-green">→ return</span>      │
+  └──────┬──────┘             └──────────────┘
+         │ miss
+         ▼
+  ┌─────────────┐             ┌──────────────┐
+  │ Generate    │ ───────────► <span class="hl-yellow">Save to disk</span>  │
+  │ new cert    │             │ <span class="hl-yellow">+ memory</span>     │
+  │ (~200-500ms)│             │ <span class="hl-yellow">→ return</span>     │
+  └─────────────┘             └──────────────┘</div>
+
+  <p>The first request to a new host takes 200-500ms due to RSA key generation (done in pure JavaScript by <code>node-forge</code>). Subsequent requests are instant.</p>
+
+  <h2>Trusting the CA Certificate</h2>
+
+  <h3>macOS</h3>
+
+  <pre><code><span class="cmt"># Add to system keychain (covers Chrome + Safari + most apps)</span>
+<span class="fn">sudo</span> security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain certs/ca.crt
+
+<span class="cmt"># Verify it was added</span>
+<span class="fn">security</span> find-certificate -a -c <span class="str">"ProxyServer CA"</span> /Library/Keychains/System.keychain</code></pre>
+
+  <h3>Firefox</h3>
+
+  <p>Firefox uses its own certificate store and ignores the system keychain:</p>
+  <ol>
+    <li>Open <strong>Preferences</strong> &gt; <strong>Privacy &amp; Security</strong></li>
+    <li>Scroll to <strong>Certificates</strong> &gt; click <strong>View Certificates</strong></li>
+    <li>Go to the <strong>Authorities</strong> tab</li>
+    <li>Click <strong>Import</strong> and select <code>certs/ca.crt</code></li>
+    <li>Check <strong>"Trust this CA to identify websites"</strong></li>
+  </ol>
+
+  <h3>Linux (Chrome/Chromium)</h3>
+
+  <pre><code><span class="cmt"># Ubuntu/Debian</span>
+<span class="fn">sudo</span> cp certs/ca.crt /usr/local/share/ca-certificates/proxyserver-ca.crt
+<span class="fn">sudo</span> update-ca-certificates
+
+<span class="cmt"># For Chrome specifically</span>
+<span class="fn">certutil</span> -d sql:$HOME/.pki/nssdb -A -t <span class="str">"C,,"</span> \
+  -n <span class="str">"ProxyServer CA"</span> -i certs/ca.crt</code></pre>
+
+  <h3>Removing the CA</h3>
+
+  <pre><code><span class="cmt"># macOS — remove from system keychain</span>
+<span class="fn">sudo</span> security remove-trusted-cert -d certs/ca.crt
+
+<span class="cmt"># Or delete everything and regenerate</span>
+<span class="fn">rm</span> -rf certs/
+<span class="fn">node</span> server.js  <span class="cmt"># generates a fresh CA</span></code></pre>
+
+  <h2>Troubleshooting</h2>
+
+  <table>
+    <thead>
+      <tr><th>Problem</th><th>Cause</th><th>Fix</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>SEC_ERROR_UNKNOWN_ISSUER</code> in Firefox</td>
+        <td>Firefox uses its own cert store</td>
+        <td>Import <code>ca.crt</code> via Firefox preferences (see above)</td>
+      </tr>
+      <tr>
+        <td><code>ERR_CERT_AUTHORITY_INVALID</code> in Chrome</td>
+        <td>CA not trusted in system keychain</td>
+        <td>Run the <code>security add-trusted-cert</code> command</td>
+      </tr>
+      <tr>
+        <td>Certificate errors after deleting <code>certs/</code></td>
+        <td>Old CA was trusted; new CA is different</td>
+        <td>Remove old CA from trust store, re-trust new one</td>
+      </tr>
+      <tr>
+        <td>Slow first HTTPS request per host</td>
+        <td>RSA key generation in pure JS</td>
+        <td>Normal — subsequent requests use cached cert</td>
+      </tr>
+      <tr>
+        <td>Certificate pinning errors (mobile apps)</td>
+        <td>App verifies specific cert, not just CA chain</td>
+        <td>MITM proxy cannot bypass pinning without app modification</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-nav">
+    <a href="getting-started.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Installation &amp; Setup</span>
+    </a>
+    <a href="dashboard.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">Dashboard Guide &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

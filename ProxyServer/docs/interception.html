@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intercept &amp; Modify - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html" class="active">Intercept &amp; Modify</a>
+  <a href="ai-chat.html">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> Intercept &amp; Modify</div>
+
+  <h1>Intercept &amp; Modify
+    <span class="subtitle">Pause, edit, and control HTTP traffic in real time</span>
+  </h1>
+
+  <p>ProxyServer can pause matching requests and responses mid-flight, letting you inspect them, modify any part (method, URL, headers, body, status code), then forward or drop them. This is essential for testing how servers and clients react to unexpected data.</p>
+
+  <h2>How Interception Works</h2>
+
+  <div class="diagram"><span class="hl-cyan">Request Flow (Intercept ON + matching rule):</span>
+
+  Browser ──► Proxy ──► <span class="hl-yellow">PAUSED</span> ──► Dashboard shows edit modal
+                                         │
+                              ┌──────────┴──────────┐
+                              │                     │
+                        [<span class="hl-green">Forward</span>]              [<span class="hl-red">Drop</span>]
+                              │                     │
+                              ▼                     ▼
+                    Request sent to          <span class="hl-red">Connection reset</span>
+                    upstream server          <span class="hl-red">Client gets 502</span>
+                              │
+                              ▼
+                    Response received
+                              │
+                              ▼
+                        <span class="hl-yellow">PAUSED</span> (if response rule matches too)
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+              [<span class="hl-green">Forward</span>]            [<span class="hl-red">Drop</span>]
+                    │                   │
+                    ▼                   ▼
+              Client receives      <span class="hl-red">Client gets 502</span>
+              (modified) response</div>
+
+  <p>Two things must be true for interception to happen:</p>
+  <ol>
+    <li><strong>Intercept is globally ON</strong> — Toggle the "Intercept" button in the topbar (or press <code>i</code>)</li>
+    <li><strong>A matching rule exists</strong> — At least one enabled rule must match the request</li>
+  </ol>
+
+  <h2>Managing Rules</h2>
+
+  <p>Click <strong>Rules</strong> in the topbar to open the rules modal. Rules define <em>which</em> requests get intercepted.</p>
+
+  <h3>Rule Fields</h3>
+
+  <table>
+    <thead><tr><th>Field</th><th>Description</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><code>urlPattern</code></td><td>Glob pattern matched against the full URL. <code>*</code> matches any sequence of characters.</td><td><code>*api/users*</code></td></tr>
+      <tr><td><code>method</code></td><td>HTTP method filter. <code>*</code> matches any method.</td><td><code>POST</code></td></tr>
+      <tr><td><code>contentType</code></td><td>Substring match on the Content-Type header.</td><td><code>json</code></td></tr>
+      <tr><td><code>headerKey</code></td><td>Match requests with this header present.</td><td><code>authorization</code></td></tr>
+      <tr><td><code>headerValue</code></td><td>Substring match on the header's value.</td><td><code>Bearer</code></td></tr>
+      <tr><td><code>direction</code></td><td>Which phase to intercept: <code>request</code>, <code>response</code>, or <code>both</code>.</td><td><code>request</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Glob Pattern Matching</h3>
+
+  <p>The <code>urlPattern</code> uses simple glob syntax:</p>
+
+  <table>
+    <thead><tr><th>Pattern</th><th>Matches</th><th>Doesn't Match</th></tr></thead>
+    <tbody>
+      <tr><td><code>*api*</code></td><td><code>https://example.com/api/v1/users</code></td><td><code>https://cdn.example.com/styles.css</code></td></tr>
+      <tr><td><code>*login*</code></td><td><code>https://auth.example.com/login</code></td><td><code>https://example.com/logout</code></td></tr>
+      <tr><td><code>*.json</code></td><td><code>https://example.com/data.json</code></td><td><code>https://example.com/data.xml</code></td></tr>
+      <tr><td><code>*example.com*</code></td><td>Any URL to example.com</td><td>Any other domain</td></tr>
+    </tbody>
+  </table>
+
+  <div class="info-box note">
+    <strong>All match criteria combine with AND logic.</strong> If you set both <code>urlPattern: *api*</code> and <code>method: POST</code>, only POST requests to URLs containing "api" will be intercepted.
+  </div>
+
+  <h3>Creating Rules via the API</h3>
+
+  <pre><code><span class="cmt"># Create a rule to intercept all POST requests to any /api/ endpoint</span>
+<span class="fn">curl</span> -X POST http://localhost:9081/api/rules \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "urlPattern": "*api*",
+    "method": "POST",
+    "direction": "request"
+  }'</span>
+
+<span class="cmt"># List all rules</span>
+<span class="fn">curl</span> http://localhost:9081/api/rules</code></pre>
+
+  <h2>Request Interception</h2>
+
+  <p>When a request matches a rule with <code>direction: "request"</code> or <code>"both"</code>:</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Request pauses</strong>
+      <p>The entry's state changes to <code>intercepted</code> and its row turns yellow in the traffic list. The client's connection hangs, waiting.</p>
+    </li>
+    <li>
+      <strong>Edit modal appears</strong>
+      <p>The dashboard shows a modal with editable fields:</p>
+      <ul>
+        <li><strong>Method</strong> — Change GET to POST, etc.</li>
+        <li><strong>URL</strong> — Modify the path and query string</li>
+        <li><strong>Headers (JSON)</strong> — Edit the full header object</li>
+        <li><strong>Body</strong> — Modify the request body</li>
+      </ul>
+    </li>
+    <li>
+      <strong>Forward or Drop</strong>
+      <ul>
+        <li><strong>Forward</strong> — Sends the (potentially modified) request to the upstream server</li>
+        <li><strong>Drop</strong> — Aborts the request. The client receives a <code>502 Bad Gateway</code></li>
+      </ul>
+    </li>
+  </ol>
+
+  <h2>Response Interception</h2>
+
+  <p>When a response matches a rule with <code>direction: "response"</code> or <code>"both"</code>:</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Full response is buffered</strong>
+      <p>The proxy receives the complete response from the upstream server and buffers it in memory.</p>
+    </li>
+    <li>
+      <strong>Response pauses</strong>
+      <p>The entry's state changes back to <code>intercepted</code> with <code>phase: "response"</code>.</p>
+    </li>
+    <li>
+      <strong>Edit modal appears</strong>
+      <p>The modal shows response-specific fields:</p>
+      <ul>
+        <li><strong>Status Code</strong> — Change 200 to 404, etc.</li>
+        <li><strong>Original URL</strong> — Read-only, for reference</li>
+        <li><strong>Headers (JSON)</strong> — Edit response headers</li>
+        <li><strong>Body</strong> — Modify the response body</li>
+      </ul>
+    </li>
+    <li>
+      <strong>Forward or Drop</strong>
+      <ul>
+        <li><strong>Forward</strong> — Sends the (potentially modified) response to the client</li>
+        <li><strong>Drop</strong> — Aborts. Client gets <code>502 Bad Gateway</code></li>
+      </ul>
+    </li>
+  </ol>
+
+  <div class="info-box warning">
+    <strong>Response interception buffers the entire response body.</strong> For large files (multi-MB downloads), this increases memory usage temporarily. The client receives no data until you click Forward.
+  </div>
+
+  <h2>Auto-Forward Timeout</h2>
+
+  <p>Intercepted requests and responses <strong>auto-forward after 5 minutes</strong> if you don't act on them. This prevents:</p>
+  <ul>
+    <li>Clients hanging indefinitely</li>
+    <li>Connection leaks and timeouts</li>
+    <li>Forgetting about an intercepted request in another tab</li>
+  </ul>
+
+  <h2>Common Use Cases</h2>
+
+  <h3>1. Test error handling</h3>
+  <p>Intercept responses and change <code>200</code> to <code>500</code> to see how your app handles server errors.</p>
+
+  <h3>2. Modify API responses</h3>
+  <p>Change JSON response bodies to test edge cases — empty arrays, missing fields, unexpected values.</p>
+
+  <h3>3. Inject authentication headers</h3>
+  <p>Intercept requests and add/modify the <code>Authorization</code> header to test different user sessions.</p>
+
+  <h3>4. Simulate slow responses</h3>
+  <p>Intercept a response, wait 10 seconds, then forward — your app experiences a 10-second delay.</p>
+
+  <h3>5. Block specific requests</h3>
+  <p>Drop analytics, tracking, or third-party requests to see how your app behaves without them.</p>
+
+  <div class="page-nav">
+    <a href="dashboard.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Dashboard Guide</span>
+    </a>
+    <a href="ai-chat.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">AI Chat Agent &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>

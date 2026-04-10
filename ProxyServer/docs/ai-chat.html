@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat Agent - ProxyServer Docs</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <a href="index.html" class="sidebar-logo">Proxy<span>Server</span> Docs</a>
+  <div class="sidebar-section">Getting Started</div>
+  <a href="index.html">Overview</a>
+  <a href="getting-started.html">Installation &amp; Setup</a>
+  <a href="certificates.html">TLS &amp; Certificates</a>
+  <div class="sidebar-section">Using the Proxy</div>
+  <a href="dashboard.html">Dashboard Guide</a>
+  <a href="interception.html">Intercept &amp; Modify</a>
+  <a href="ai-chat.html" class="active">AI Chat Agent</a>
+  <div class="sidebar-section">Deep Dive</div>
+  <a href="architecture.html">Architecture</a>
+  <a href="request-lifecycle.html">Request Lifecycle</a>
+  <a href="api-reference.html">API Reference</a>
+</nav>
+
+<main class="content">
+  <div class="breadcrumb"><a href="index.html">Docs</a> <span>/</span> AI Chat Agent</div>
+
+  <h1>AI Chat Agent
+    <span class="subtitle">Ask an AI about your traffic, generate rules, and get curl commands</span>
+  </h1>
+
+  <p>The dashboard includes an embedded AI chat agent powered by Claude Code. It can see your captured traffic, understand the proxy's architecture, answer questions, and take actions like creating intercept rules or generating curl commands.</p>
+
+  <h2>Prerequisites</h2>
+
+  <ul>
+    <li><strong>Claude Code CLI</strong> must be installed and accessible as <code>claude</code> in your PATH</li>
+    <li>If the CLI is not found, the chat panel shows a graceful "not available" message</li>
+  </ul>
+
+  <h2>The Chat Panel</h2>
+
+  <div class="diagram">┌──────────────────────────────────────────┐
+│ AI Chat                    [toggles] [-] │  ← Header (collapse/expand)
+├──────────────────────────────────────────┤
+│ [<span class="hl-green">x</span>] Traffic  [ ] Selected  [ ] Rules [ ] Src │  ← Context checkboxes
+│ [<span class="hl-cyan">====traffic====</span>|<span class="hl-yellow">==rules==</span>|              ] │  ← Token budget bar
+├──────────────────────────────────────────┤
+│                                          │
+│  <span class="hl-accent">You:</span> Show me all POST requests to /api/* │
+│                                          │
+│  <span class="hl">Claude:</span> I found 12 POST requests...      │  ← Scrollable messages
+│  ```                                     │
+│  POST /api/users (200, 42ms)             │
+│  ```                                     │
+│                                          │
+├──────────────────────────────────────────┤
+│ [Type a message...              ] [Send] │  ← Input area
+└──────────────────────────────────────────┘</div>
+
+  <p>The panel is fixed to the bottom-right corner. When collapsed, it shows as a small pill button reading "AI Chat" with a green dot if Claude is available.</p>
+
+  <h2>Context Toggles</h2>
+
+  <p>You control exactly what information the agent sees using the checkbox toggles in the panel header. Each toggle includes a section of data in the system prompt sent to Claude:</p>
+
+  <table>
+    <thead><tr><th>Toggle</th><th>What It Includes</th><th>Token Cost</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Traffic</strong></td><td>Summary table of the most recent 200 captured requests (method, status, host, path, type, size, time)</td><td>Medium (~2-5k tokens)</td></tr>
+      <tr><td><strong>Selected</strong></td><td>Full detail of the currently selected traffic entry (headers, bodies, timing). Select an entry in the traffic list first.</td><td>Variable (depends on body size, max ~10k tokens)</td></tr>
+      <tr><td><strong>Rules</strong></td><td>All current intercept rules as JSON</td><td>Low (~100-500 tokens)</td></tr>
+      <tr><td><strong>Source</strong></td><td>Key ProxyServer source files — server.js, proxy-server.js, tls-handler.js, traffic-store.js, etc.</td><td>High (~15-25k tokens)</td></tr>
+      <tr><td><strong>Browser</strong></td><td>Cookies and localStorage from the browser extension (if installed)</td><td>Variable</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Token Budget Bar</h3>
+
+  <p>The colored bar below the toggles shows the approximate token breakdown of the current context. Each segment represents one context block, and the total is displayed as "~Nk tokens". This helps you understand how much context you're sending per message.</p>
+
+  <h2>What You Can Ask</h2>
+
+  <h3>Traffic Analysis</h3>
+  <ul>
+    <li>"How many requests have been captured?"</li>
+    <li>"Show me all POST requests to /api endpoints"</li>
+    <li>"Which requests returned 4xx or 5xx errors?"</li>
+    <li>"What's the average response time?"</li>
+    <li>"Summarize the traffic patterns I'm seeing"</li>
+  </ul>
+
+  <h3>Request Details</h3>
+  <p>(Toggle "Selected" ON and click a request first)</p>
+  <ul>
+    <li>"What content type is this response?"</li>
+    <li>"Explain the headers in this request"</li>
+    <li>"Generate a curl command for this request"</li>
+    <li>"What does this response body contain?"</li>
+  </ul>
+
+  <h3>Rule Management</h3>
+  <ul>
+    <li>"Create a rule to intercept all POST requests to *api*"</li>
+    <li>"What intercept rules are currently active?"</li>
+    <li>"Delete the rule matching /login"</li>
+  </ul>
+
+  <h3>Architecture Questions</h3>
+  <p>(Toggle "Source" ON)</p>
+  <ul>
+    <li>"How does the ring buffer work in traffic-store.js?"</li>
+    <li>"Explain how TLS MITM interception is implemented"</li>
+    <li>"How does the request interceptor hold promises?"</li>
+    <li>"What happens when the traffic store reaches 5000 entries?"</li>
+  </ul>
+
+  <h2>Slash Commands</h2>
+
+  <table>
+    <thead><tr><th>Command</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>/reset</code></td><td>Clear the conversation history and start fresh</td></tr>
+      <tr><td><code>/compact</code></td><td>Summarize the conversation to reduce context size</td></tr>
+      <tr><td><code>/help</code></td><td>Show available commands and tips</td></tr>
+    </tbody>
+  </table>
+
+  <h2>How It Works Internally</h2>
+
+  <div class="diagram">┌────────────┐   WebSocket    ┌─────────────┐     stdin/stdout     ┌──────────┐
+│  Chat UI   │  chat:send    │ ChatHandler │    per-turn spawn    │ claude   │
+│  (chat.js) │ ────────────► │             │ ──────────────────► │ CLI      │
+│            │               │             │                      │ process  │
+│            │  chat:chunk   │ ContextBldg │ ◄────streaming JSON──│          │
+│            │ ◄──────────── │             │                      │ (tools:  │
+│            │  chat:done    │ ClaudeSessn │                      │  Read,   │
+│            │ ◄──────────── │             │                      │  Write,  │
+└────────────┘               └─────────────┘                      │  Edit,   │
+                                                                  │  Bash)   │
+                                                                  └──────────┘</div>
+
+  <ol>
+    <li>User types a message in the chat panel</li>
+    <li>Chat.js sends a <code>chat:send</code> WebSocket message with the text, selected entry ID, and context toggles</li>
+    <li>WSBridge routes the <code>chat:*</code> message to ChatHandler</li>
+    <li>ChatHandler calls ContextBuilder to assemble the system prompt from enabled context blocks</li>
+    <li>ClaudeSession spawns <code>claude -p &lt;prompt&gt; --output-format stream-json</code> as a subprocess</li>
+    <li>Streaming JSON events are parsed and forwarded as <code>chat:chunk</code> messages to the client</li>
+    <li>When the process completes, a <code>chat:done</code> message is sent with the full response</li>
+    <li>Conversation history is maintained server-side and replayed as context in subsequent turns</li>
+  </ol>
+
+  <h2>Browser Extension (Optional)</h2>
+
+  <p>An optional Chrome extension in the <code>extension/</code> directory sends the current page's cookies and localStorage to the proxy, making them available to the AI agent.</p>
+
+  <h3>Installing</h3>
+  <ol>
+    <li>Open <code>chrome://extensions/</code></li>
+    <li>Enable "Developer mode"</li>
+    <li>Click "Load unpacked" and select the <code>extension/</code> directory</li>
+    <li>Click the extension icon and "Send Context" while on any page</li>
+  </ol>
+
+  <p>Once sent, toggle "Browser" ON in the chat panel to include this data in the AI's context.</p>
+
+  <div class="page-nav">
+    <a href="interception.html">
+      <span class="label">Previous</span>
+      <span class="title">&#8592; Intercept &amp; Modify</span>
+    </a>
+    <a href="architecture.html" class="next">
+      <span class="label">Next</span>
+      <span class="title">Architecture &#8594;</span>
+    </a>
+  </div>
+</main>
+
+</body>
+</html>
