@@ -77,6 +77,14 @@ class SessionBrowserApp(App):
         height: 1fr;
     }
 
+    .marker-info {
+        height: 4;
+        dock: bottom;
+        border-top: solid $secondary;
+        padding: 0 1;
+        background: $surface-darken-1;
+    }
+
     #range-summary {
         height: 4;
         dock: bottom;

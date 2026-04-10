@@ -35,6 +35,12 @@ class UsageData:
     model: str = "unknown"
     service_tier: Optional[str] = None
     speed: Optional[str] = None
+    timestamp: Optional[float] = None
+    record_uuid: Optional[str] = None
+    request_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    is_sidechain: bool = False
+    source: str = "main"
 
     @property
     def total_tokens(self) -> int:
@@ -78,11 +84,25 @@ DYNAMIC_TYPES = {"user", "assistant", "system"}
 
 
 @dataclass
+class ChartMarker:
+    """Vertical chart marker for agent launches or subagent activity."""
+
+    kind: str  # "agent_launch", "subagent_start", "subagent_end"
+    timestamp: Optional[float]
+    label: str
+    agent_id: Optional[str] = None
+    total_tokens: int = 0
+    detail: Optional[str] = None
+    reset_at: Optional[float] = None
+
+
+@dataclass
 class ParsedSession:
     """Fully parsed session data, ready for display."""
 
     index: SessionIndex
     records: list[SessionRecord] = field(default_factory=list)
+    chart_markers: list[ChartMarker] = field(default_factory=list)
 
     @property
     def dynamic_records(self) -> list[SessionRecord]:
@@ -94,8 +114,24 @@ class ParsedSession:
 
     @property
     def usage_series(self) -> list[UsageData]:
-        """Ordered list of usage data from assistant messages (for charts)."""
-        return [r.usage for r in self.records if r.usage is not None]
+        """Ordered usage data, collapsing streaming continuations by request ID."""
+        series: list[UsageData] = []
+        for record in self.records:
+            usage = record.usage
+            if usage is None or usage.total_tokens <= 0:
+                continue
+
+            if (
+                series
+                and usage.request_id
+                and series[-1].request_id == usage.request_id
+                and series[-1].source == usage.source
+            ):
+                series[-1] = usage
+            else:
+                series.append(usage)
+
+        return series
 
     def common_record_summary(self) -> dict[str, int]:
         """Count of each common record type."""

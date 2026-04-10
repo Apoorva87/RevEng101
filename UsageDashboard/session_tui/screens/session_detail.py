@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Static, TabbedContent, TabPane
 
@@ -29,6 +28,8 @@ class SessionDetailScreen(Screen):
         ("3", "switch_tab('tab-cache')", "Cache Analysis"),
         ("tab", "next_tab", "Next tab"),
         ("shift+tab", "prev_tab", "Prev tab"),
+        ("t", "toggle_axis_mode", "Toggle x-axis"),
+        ("m", "toggle_markers", "Toggle markers"),
     ]
 
     def __init__(self, index: SessionIndex):
@@ -92,18 +93,40 @@ class SessionDetailScreen(Screen):
         loading_t = self.query_one("#loading-tokens", Static)
         loading_t.remove()
         usage_series = self.parsed.usage_series
-        tokens_tab.mount(TokenChart(usage_series, id="chart-container"))
+        tokens_tab.mount(
+            TokenChart(
+                usage_series,
+                chart_markers=self.parsed.chart_markers,
+                id="chart-container",
+            )
+        )
 
         # --- Cache Analysis tab ---
         cache_tab = self.query_one("#tab-cache", TabPane)
         loading_c = self.query_one("#loading-cache", Static)
         loading_c.remove()
-        cache_tab.mount(CacheChart(usage_series, id="cache-container"))
+        cache_tab.mount(
+            CacheChart(
+                usage_series,
+                chart_markers=self.parsed.chart_markers,
+                id="cache-container",
+            )
+        )
+
+        launch_count = sum(
+            1 for marker in self.parsed.chart_markers if marker.kind == "agent_launch"
+        )
+        subagent_count = len({
+            marker.agent_id or marker.label
+            for marker in self.parsed.chart_markers
+            if marker.kind.startswith("subagent_")
+        })
 
         total_records = len(self.parsed.records)
         self.notify(
             f"Loaded {total_records} records "
-            f"({len(dynamic)} dynamic, {len(usage_series)} with usage)",
+            f"({len(dynamic)} dynamic, {len(usage_series)} with usage, "
+            f"{launch_count} launches, {subagent_count} subagents)",
             timeout=3,
         )
 
@@ -166,6 +189,32 @@ class SessionDetailScreen(Screen):
         current = tabs.active
         idx = self.TAB_IDS.index(current) if current in self.TAB_IDS else 0
         tabs.active = self.TAB_IDS[(idx - 1) % len(self.TAB_IDS)]
+
+    def action_toggle_axis_mode(self) -> None:
+        axis_mode = None
+        for chart_type in (TokenChart, CacheChart):
+            try:
+                chart = self.query_one(chart_type)
+            except Exception:
+                continue
+            axis_mode = chart.toggle_axis_mode()
+
+        if axis_mode:
+            label = "elapsed time" if axis_mode == "timeline" else "message count"
+            self.notify(f"X-axis set to {label}")
+
+    def action_toggle_markers(self) -> None:
+        markers_enabled = None
+        for chart_type in (TokenChart, CacheChart):
+            try:
+                chart = self.query_one(chart_type)
+            except Exception:
+                continue
+            markers_enabled = chart.toggle_markers()
+
+        if markers_enabled is not None:
+            state = "shown" if markers_enabled else "hidden"
+            self.notify(f"Agent and subagent markers {state}")
 
     def action_go_back(self) -> None:
         self.app.pop_screen()

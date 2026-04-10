@@ -18,7 +18,14 @@ from textual.widget import Widget
 from textual.widgets import Static
 from textual_plotext import PlotextPlot
 
-from ..models import UsageData
+from ..chart_support import (
+    build_axis_layout,
+    build_time_ticks,
+    marker_x_position,
+    nearest_usage_index,
+)
+from ..models import ChartMarker, UsageData
+from .marker_info import MarkerInfo
 from .range_summary import RangeSummary
 
 CACHE_DESCRIPTION = (
@@ -38,6 +45,8 @@ class CacheChart(Widget):
     show_read = reactive(True)
     show_eph_5m = reactive(True)
     show_eph_1h = reactive(True)
+    axis_mode = reactive("message")
+    show_markers = reactive(True)
     cursor_pos = reactive(0)
     range_start = reactive(-1)
     range_end = reactive(-1)
@@ -51,17 +60,26 @@ class CacheChart(Widget):
         ("right", "cursor_right", "Cursor right"),
         ("[", "set_range_start", "Set range start"),
         ("]", "set_range_end", "Set range end"),
+        ("n", "next_marker", "Next marker"),
+        ("p", "prev_marker", "Prev marker"),
         ("x", "clear_range", "Clear range"),
     ]
 
-    def __init__(self, usage_series: list[UsageData], **kwargs):
+    def __init__(
+        self,
+        usage_series: list[UsageData],
+        chart_markers: list[ChartMarker] | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.usage_series = usage_series
+        self.chart_markers = chart_markers or []
 
     def compose(self) -> ComposeResult:
         yield Static(CACHE_DESCRIPTION, id="cache-description")
         yield PlotextPlot(id="cache-plot")
         yield Static("", id="cache-legend", classes="chart-legend")
+        yield MarkerInfo(id="cache-marker-info", classes="marker-info")
         yield RangeSummary(id="cache-range-summary")
 
     def on_mount(self) -> None:
@@ -74,6 +92,15 @@ class CacheChart(Widget):
         r = "ON" if self.show_read else "off"
         e5 = "ON" if self.show_eph_5m else "off"
         e1 = "ON" if self.show_eph_1h else "off"
+        axis_label = "time" if self.axis_mode == "timeline" else "msg"
+        markers_label = "ON" if self.show_markers else "off"
+        launch_count = sum(1 for marker in self.chart_markers if marker.kind == "agent_launch")
+        subagent_count = len({
+            marker.agent_id or marker.label
+            for marker in self.chart_markers
+            if marker.kind.startswith("subagent_")
+        })
+        limit_count = sum(1 for marker in self.chart_markers if marker.kind == "rate_limit_hit")
         total_create = sum(u.cache_creation_input_tokens for u in self.usage_series)
         total_read = sum(u.cache_read_input_tokens for u in self.usage_series)
         ratio = f"{total_read / total_create:.2f}" if total_create > 0 else "N/A"
@@ -82,6 +109,8 @@ class CacheChart(Widget):
             f"[w] creation:{w}  [r] read:{r}  "
             f"[5] eph_5m:{e5}  [h] eph_1h:{e1}  |  "
             f"ratio: {ratio} read/create  |  "
+            f"[t] axis:{axis_label}  [m] markers:{markers_label}  "
+            f"(launch:{launch_count} sub:{subagent_count} limit:{limit_count})  |  "
             f"Left/Right  [ ]  x"
         )
 
@@ -96,7 +125,8 @@ class CacheChart(Widget):
             plot_widget.refresh()
             return
 
-        x = list(range(1, len(self.usage_series) + 1))
+        axis_layout = build_axis_layout(self.usage_series, self.axis_mode)
+        x = axis_layout.x_values
         all_y: list[int] = []
 
         if self.show_creation:
@@ -126,20 +156,57 @@ class CacheChart(Widget):
             yticks = list(range(0, max_y + step + 1, step))
             plt.yticks(yticks)
 
+        marker_positions: list[tuple[str, float]] = []
+        if self.show_markers:
+            for marker in self.chart_markers:
+                x_pos = marker_x_position(marker, self.usage_series, axis_layout)
+                if x_pos is None:
+                    continue
+                marker_positions.append((marker.kind, x_pos))
+
+            seen_positions: set[tuple[str, float]] = set()
+            for kind, x_pos in marker_positions:
+                dedupe_key = (kind, round(x_pos, 6))
+                if dedupe_key in seen_positions:
+                    continue
+                seen_positions.add(dedupe_key)
+
+                color = self._marker_color(kind)
+                plt.vline(x_pos, color=color)
+
         # Range markers
         if self.range_start >= 0 and self.range_start < len(self.usage_series):
-            plt.vline(self.range_start + 1, color="red")
+            plt.vline(x[self.range_start], color="red")
         if self.range_end >= 0 and self.range_end < len(self.usage_series):
-            plt.vline(self.range_end + 1, color="red")
+            plt.vline(x[self.range_end], color="red")
 
         # Cursor
         if 0 <= self.cursor_pos < len(self.usage_series):
-            plt.vline(self.cursor_pos + 1, color="green")
+            plt.vline(x[self.cursor_pos], color="green")
 
-        plt.title("Cache Token Analysis")
-        plt.xlabel("Message #")
+        axis_positions = list(x)
+        axis_positions.extend(position for _, position in marker_positions)
+        if axis_positions:
+            x_min = min(axis_positions)
+            x_max = max(axis_positions)
+            if x_min == x_max:
+                x_min -= 1
+                x_max += 1
+            plt.xlim(x_min, x_max)
+
+        if axis_layout.mode == "timeline":
+            tick_min = min(axis_positions) if axis_positions else 0.0
+            tick_max = max(axis_positions) if axis_positions else 0.0
+            xticks, xlabels = build_time_ticks(tick_min, tick_max)
+            plt.xticks(xticks, xlabels)
+            plt.xfrequency(0)
+
+        axis_title = "Elapsed Time" if axis_layout.mode == "timeline" else "Message Order"
+        plt.title(f"Cache Token Analysis ({axis_title})")
+        plt.xlabel(axis_layout.xlabel)
         plt.ylabel("Tokens (K)")
         plot_widget.refresh()
+        self._update_marker_info(axis_layout)
 
     def _update_range_summary(self) -> None:
         summary = self.query_one(RangeSummary)
@@ -155,6 +222,37 @@ class CacheChart(Widget):
     def on_resize(self, event) -> None:
         self._redraw()
 
+    def _update_marker_info(self, axis_layout=None) -> None:
+        if axis_layout is None:
+            axis_layout = build_axis_layout(self.usage_series, self.axis_mode)
+        marker_info = self.query_one(MarkerInfo)
+        marker_info.update_for_cursor(
+            usage_series=self.usage_series,
+            chart_markers=self.chart_markers if self.show_markers else [],
+            axis_layout=axis_layout,
+            cursor_index=self.cursor_pos,
+        )
+
+    def _marker_color(self, kind: str) -> str:
+        if kind == "agent_launch":
+            return "yellow"
+        if kind.startswith("subagent_"):
+            return "blue"
+        if kind == "rate_limit_hit":
+            return "red"
+        if kind == "rate_limit_reset":
+            return "magenta"
+        return "white"
+
+    def _marker_targets(self) -> list[int]:
+        targets = {
+            idx
+            for marker in self.chart_markers
+            for idx in [nearest_usage_index(self.usage_series, marker.timestamp)]
+            if idx is not None
+        }
+        return sorted(targets)
+
     def watch_show_creation(self, _: bool) -> None:
         self._update_legend()
         self._redraw()
@@ -168,6 +266,14 @@ class CacheChart(Widget):
         self._redraw()
 
     def watch_show_eph_1h(self, _: bool) -> None:
+        self._update_legend()
+        self._redraw()
+
+    def watch_axis_mode(self, _: str) -> None:
+        self._update_legend()
+        self._redraw()
+
+    def watch_show_markers(self, _: bool) -> None:
         self._update_legend()
         self._redraw()
 
@@ -211,3 +317,29 @@ class CacheChart(Widget):
     def action_clear_range(self) -> None:
         self.range_start = -1
         self.range_end = -1
+
+    def toggle_axis_mode(self) -> str:
+        self.axis_mode = "timeline" if self.axis_mode == "message" else "message"
+        return self.axis_mode
+
+    def toggle_markers(self) -> bool:
+        self.show_markers = not self.show_markers
+        return self.show_markers
+
+    def action_next_marker(self) -> None:
+        for idx in self._marker_targets():
+            if idx > self.cursor_pos:
+                self.cursor_pos = idx
+                return
+        targets = self._marker_targets()
+        if targets:
+            self.cursor_pos = targets[0]
+
+    def action_prev_marker(self) -> None:
+        for idx in reversed(self._marker_targets()):
+            if idx < self.cursor_pos:
+                self.cursor_pos = idx
+                return
+        targets = self._marker_targets()
+        if targets:
+            self.cursor_pos = targets[-1]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
+from ..chart_support import format_elapsed_label, format_local_timestamp
 from ..models import UsageData
 
 
@@ -28,6 +29,16 @@ class RangeSummary(Static):
             self.update("No data in selected range")
             return
 
+        header = f"Range: msg{start_idx + 1}-msg{end_idx + 1}"
+        start_ts = usage_slice[0].timestamp
+        end_ts = usage_slice[-1].timestamp
+        if start_ts is not None and end_ts is not None:
+            elapsed = max(0.0, end_ts - start_ts)
+            header += (
+                f"  |  {format_local_timestamp(start_ts)} -> {format_local_timestamp(end_ts)}"
+                f"  |  span: {format_elapsed_label(elapsed)}"
+            )
+
         if mode == "cache":
             total_create = sum(u.cache_creation_input_tokens for u in usage_slice)
             total_read = sum(u.cache_read_input_tokens for u in usage_slice)
@@ -35,8 +46,7 @@ class RangeSummary(Static):
             total_eph_5m = sum(u.ephemeral_5m_input_tokens for u in usage_slice)
             total_eph_1h = sum(u.ephemeral_1h_input_tokens for u in usage_slice)
             self.update(
-                f"Range: msg{start_idx + 1}-msg{end_idx + 1}  |  "
-                f"Selected totals:\n"
+                f"{header}  |  Selected totals:\n"
                 f"cache_create: {_fmt(total_create)}  "
                 f"cache_read: {_fmt(total_read)}  "
                 f"ratio: {ratio} read/create\n"
@@ -49,8 +59,7 @@ class RangeSummary(Static):
             total_cache = sum(u.cache_read_input_tokens for u in usage_slice)
             total_all = sum(u.total_tokens for u in usage_slice)
             self.update(
-                f"Range: msg{start_idx + 1}-msg{end_idx + 1}  |  "
-                f"Selected totals:\n"
+                f"{header}  |  Selected totals:\n"
                 f"input: {_fmt(total_in)}  "
                 f"output: {_fmt(total_out)}  "
                 f"cache_read: {_fmt(total_cache)}  "
