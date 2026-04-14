@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OAuthModelRouter Docs</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: rgba(255, 252, 245, 0.88);
+      --panel-strong: rgba(255, 250, 241, 0.96);
+      --ink: #1d1a16;
+      --muted: #64594e;
+      --line: rgba(29, 26, 22, 0.12);
+      --accent: #b54d2f;
+      --accent-2: #0d6b63;
+      --shadow: 0 24px 60px rgba(43, 29, 18, 0.12);
+      --code: #fff7eb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(181, 77, 47, 0.2), transparent 32%),
+        radial-gradient(circle at top right, rgba(13, 107, 99, 0.18), transparent 28%),
+        linear-gradient(180deg, #faf5eb 0%, #f3ecdf 52%, #eee5d7 100%);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 20px;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .sidebar,
+    .viewer {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      padding: 22px 18px 18px;
+      background: var(--panel);
+    }
+
+    .viewer {
+      min-height: calc(100vh - 48px);
+      overflow: hidden;
+      background: var(--panel-strong);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 0.96;
+    }
+
+    .lede {
+      margin: 14px 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 1rem;
+    }
+
+    .meta {
+      margin: 18px 0 0;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(181, 77, 47, 0.08);
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .section-title {
+      margin: 22px 0 10px;
+      font-size: 0.86rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .doc-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .doc-link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 13px 14px;
+      border-radius: 16px;
+      border: 1px solid transparent;
+      background: rgba(255, 255, 255, 0.55);
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .doc-link:hover,
+    .doc-link:focus-visible {
+      transform: translateY(-1px);
+      border-color: rgba(181, 77, 47, 0.3);
+      background: rgba(255, 255, 255, 0.9);
+      outline: none;
+    }
+
+    .doc-link.active {
+      border-color: rgba(13, 107, 99, 0.35);
+      background: rgba(13, 107, 99, 0.08);
+    }
+
+    .doc-kind {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(29, 26, 22, 0.08);
+      font-size: 0.76rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .doc-title {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.2;
+    }
+
+    .doc-path {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+      word-break: break-all;
+    }
+
+    .viewer-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(181, 77, 47, 0.08), rgba(13, 107, 99, 0.04)),
+        rgba(255, 252, 245, 0.85);
+    }
+
+    .viewer-title {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+
+    .viewer-path {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+      font-size: 0.85rem;
+    }
+
+    .viewer-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(29, 26, 22, 0.12);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+
+    .button:hover,
+    .button:focus-visible {
+      border-color: rgba(181, 77, 47, 0.34);
+      outline: none;
+    }
+
+    .viewer-body {
+      height: calc(100vh - 144px);
+      overflow: auto;
+    }
+
+    .viewer-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      display: none;
+    }
+
+    .markdown-view {
+      display: none;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 34px 28px 56px;
+      line-height: 1.7;
+      font-size: 1rem;
+    }
+
+    .markdown-view.is-visible,
+    .viewer-frame.is-visible {
+      display: block;
+    }
+
+    .markdown-view h1,
+    .markdown-view h2,
+    .markdown-view h3,
+    .markdown-view h4 {
+      line-height: 1.15;
+      margin: 1.6em 0 0.55em;
+    }
+
+    .markdown-view h1 { font-size: 2.2rem; }
+    .markdown-view h2 { font-size: 1.6rem; }
+    .markdown-view h3 { font-size: 1.25rem; }
+    .markdown-view p,
+    .markdown-view ul,
+    .markdown-view ol,
+    .markdown-view blockquote {
+      margin: 0.85em 0;
+    }
+
+    .markdown-view ul,
+    .markdown-view ol {
+      padding-left: 1.3rem;
+    }
+
+    .markdown-view blockquote {
+      padding: 0.1rem 1rem;
+      border-left: 3px solid rgba(181, 77, 47, 0.45);
+      color: var(--muted);
+      background: rgba(181, 77, 47, 0.06);
+      border-radius: 0 14px 14px 0;
+    }
+
+    .markdown-view code {
+      padding: 0.15rem 0.35rem;
+      border-radius: 6px;
+      background: var(--code);
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+      font-size: 0.92em;
+    }
+
+    .markdown-view pre {
+      padding: 1rem 1.1rem;
+      overflow: auto;
+      border-radius: 16px;
+      background: #1d1a16;
+      color: #f8f4eb;
+    }
+
+    .markdown-view pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    .markdown-view hr {
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin: 2rem 0;
+    }
+
+    .markdown-view table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.1rem 0;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+    }
+
+    .markdown-view th,
+    .markdown-view td {
+      padding: 0.75rem 0.8rem;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    .markdown-view th {
+      background: rgba(29, 26, 22, 0.06);
+      font-size: 0.92rem;
+    }
+
+    .status {
+      padding: 40px 28px;
+      color: var(--muted);
+    }
+
+    .status strong {
+      color: var(--ink);
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+      }
+
+      .viewer {
+        min-height: 70vh;
+      }
+
+      .viewer-body {
+        height: auto;
+        min-height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <p class="eyebrow">Repository Guide</p>
+      <h1>OAuthModelRouter</h1>
+      <p class="lede">A small docs hub for the repo’s Markdown notes and standalone HTML explainers.</p>
+      <div class="meta">
+        Markdown files render inline here when the page is served over HTTP.
+        If you open this file directly and the browser blocks local fetches, use the raw file link instead.
+      </div>
+
+      <h2 class="section-title">Markdown</h2>
+      <nav class="doc-list" id="md-list"></nav>
+
+      <h2 class="section-title">HTML</h2>
+      <nav class="doc-list" id="html-list"></nav>
+    </aside>
+
+    <main class="viewer">
+      <div class="viewer-head">
+        <div>
+          <h2 class="viewer-title" id="viewer-title">Select a document</h2>
+          <p class="viewer-path" id="viewer-path">Choose any Markdown or HTML file from the left.</p>
+        </div>
+        <div class="viewer-actions">
+          <a class="button" id="open-raw" href="README.md">Open Raw File</a>
+        </div>
+      </div>
+      <div class="viewer-body">
+        <iframe class="viewer-frame" id="viewer-frame" title="Document preview"></iframe>
+        <article class="markdown-view" id="markdown-view"></article>
+        <div class="status" id="status">
+          <strong>Start here:</strong> open the repo README, then branch into the research notes or HTML explainers.
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const docs = [
+      { title: "README", path: "README.md", kind: "md" },
+      { title: "Claude Notes", path: "docs/research/CLAUDE.md", kind: "md" },
+      { title: "OpenAI Auth Flow", path: "docs/research/OPENAI_AUTH_FLOW.md", kind: "md" },
+      { title: "Research Notes", path: "docs/research/RESEARCH.md", kind: "md" },
+      { title: "Design Spec Archive", path: "docs/archive/2026-04-12-oauth-model-router-design.md", kind: "md" },
+      { title: "OpenAI Auth Explainer", path: "docs/explainers/openai_auth_explained.html", kind: "html" },
+      { title: "Claude Auth Explainer", path: "docs/explainers/claude_auth_explained.html", kind: "html" },
+      { title: "PKCE Deep Dive", path: "docs/explainers/pkce_code_interception.html", kind: "html" }
+    ];
+
+    const titleEl = document.getElementById("viewer-title");
+    const pathEl = document.getElementById("viewer-path");
+    const rawEl = document.getElementById("open-raw");
+    const frameEl = document.getElementById("viewer-frame");
+    const markdownEl = document.getElementById("markdown-view");
+    const statusEl = document.getElementById("status");
+    const mdListEl = document.getElementById("md-list");
+    const htmlListEl = document.getElementById("html-list");
+
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function renderInline(text) {
+      return text
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    }
+
+    function markdownToHtml(markdown) {
+      const lines = markdown.replace(/\r/g, "").split("\n");
+      let html = "";
+      let inCode = false;
+      let codeLang = "";
+      let paragraph = [];
+      let listType = null;
+      let tableRows = [];
+      let inBlockquote = false;
+
+      function flushParagraph() {
+        if (!paragraph.length) return;
+        html += `<p>${renderInline(paragraph.join(" "))}</p>`;
+        paragraph = [];
+      }
+
+      function flushList() {
+        if (!listType) return;
+        html += `</${listType}>`;
+        listType = null;
+      }
+
+      function flushTable() {
+        if (!tableRows.length) return;
+        const header = tableRows[0];
+        const body = tableRows.slice(1);
+        html += "<table><thead><tr>";
+        header.forEach((cell) => {
+          html += `<th>${renderInline(cell.trim())}</th>`;
+        });
+        html += "</tr></thead><tbody>";
+        body.forEach((row) => {
+          html += "<tr>";
+          row.forEach((cell) => {
+            html += `<td>${renderInline(cell.trim())}</td>`;
+          });
+          html += "</tr>";
+        });
+        html += "</tbody></table>";
+        tableRows = [];
+      }
+
+      function closeBlocks() {
+        flushParagraph();
+        flushList();
+        flushTable();
+        if (inBlockquote) {
+          html += "</blockquote>";
+          inBlockquote = false;
+        }
+      }
+
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+
+        if (line.startsWith("```")) {
+          closeBlocks();
+          if (!inCode) {
+            codeLang = line.slice(3).trim();
+            html += `<pre><code${codeLang ? ` data-lang="${escapeHtml(codeLang)}"` : ""}>`;
+            inCode = true;
+          } else {
+            html += "</code></pre>";
+            inCode = false;
+            codeLang = "";
+          }
+          continue;
+        }
+
+        if (inCode) {
+          html += `${escapeHtml(line)}\n`;
+          continue;
+        }
+
+        if (!line.trim()) {
+          closeBlocks();
+          continue;
+        }
+
+        const heading = line.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+          closeBlocks();
+          const level = heading[1].length;
+          html += `<h${level}>${renderInline(heading[2].trim())}</h${level}>`;
+          continue;
+        }
+
+        if (/^---+$/.test(line.trim()) || /^\*\*\*+$/.test(line.trim())) {
+          closeBlocks();
+          html += "<hr>";
+          continue;
+        }
+
+        if (line.startsWith("> ")) {
+          flushParagraph();
+          flushList();
+          flushTable();
+          if (!inBlockquote) {
+            html += "<blockquote>";
+            inBlockquote = true;
+          }
+          html += `<p>${renderInline(line.slice(2).trim())}</p>`;
+          continue;
+        }
+
+        if (inBlockquote) {
+          html += "</blockquote>";
+          inBlockquote = false;
+        }
+
+        if (line.includes("|")) {
+          const trimmed = line.trim();
+          const next = lines[i + 1] ? lines[i + 1].trim() : "";
+          const isDivider = /^\|?[\s:-]+\|[\s|:-]*$/.test(next);
+          if (trimmed.startsWith("|") && trimmed.endsWith("|") && (isDivider || tableRows.length)) {
+            flushParagraph();
+            flushList();
+            const row = trimmed
+              .slice(1, -1)
+              .split("|")
+              .map((cell) => cell.trim());
+            tableRows.push(row);
+            if (isDivider) i += 1;
+            continue;
+          }
+        }
+
+        const ul = line.match(/^\s*[-*]\s+(.*)$/);
+        if (ul) {
+          flushParagraph();
+          flushTable();
+          if (listType !== "ul") {
+            flushList();
+            html += "<ul>";
+            listType = "ul";
+          }
+          html += `<li>${renderInline(ul[1].trim())}</li>`;
+          continue;
+        }
+
+        const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+        if (ol) {
+          flushParagraph();
+          flushTable();
+          if (listType !== "ol") {
+            flushList();
+            html += "<ol>";
+            listType = "ol";
+          }
+          html += `<li>${renderInline(ol[1].trim())}</li>`;
+          continue;
+        }
+
+        flushList();
+        flushTable();
+        paragraph.push(line.trim());
+      }
+
+      closeBlocks();
+      if (inCode) html += "</code></pre>";
+      return html;
+    }
+
+    function createLink(doc) {
+      const link = document.createElement("a");
+      link.className = "doc-link";
+      link.href = `?doc=${encodeURIComponent(doc.path)}`;
+      link.dataset.path = doc.path;
+      link.innerHTML = `
+        <span class="doc-kind">${doc.kind}</span>
+        <p class="doc-title">${doc.title}</p>
+        <p class="doc-path">${doc.path}</p>
+      `;
+      link.addEventListener("click", async (event) => {
+        event.preventDefault();
+        await loadDoc(doc.path, true);
+      });
+      return link;
+    }
+
+    docs.filter((doc) => doc.kind === "md").forEach((doc) => mdListEl.appendChild(createLink(doc)));
+    docs.filter((doc) => doc.kind === "html").forEach((doc) => htmlListEl.appendChild(createLink(doc)));
+
+    function setActive(path) {
+      document.querySelectorAll(".doc-link").forEach((link) => {
+        link.classList.toggle("active", link.dataset.path === path);
+      });
+    }
+
+    function showStatus(message) {
+      statusEl.innerHTML = message;
+      statusEl.style.display = "block";
+      markdownEl.classList.remove("is-visible");
+      frameEl.classList.remove("is-visible");
+    }
+
+    async function loadDoc(path, pushState = false) {
+      const doc = docs.find((item) => item.path === path) || docs[0];
+      setActive(doc.path);
+      titleEl.textContent = doc.title;
+      pathEl.textContent = doc.path;
+      rawEl.href = doc.path;
+
+      if (pushState) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("doc", doc.path);
+        window.history.replaceState({}, "", url);
+      }
+
+      if (doc.kind === "html") {
+        statusEl.style.display = "none";
+        markdownEl.classList.remove("is-visible");
+        frameEl.src = doc.path;
+        frameEl.classList.add("is-visible");
+        return;
+      }
+
+      frameEl.classList.remove("is-visible");
+      frameEl.removeAttribute("src");
+
+      try {
+        const response = await fetch(doc.path);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const markdown = await response.text();
+        markdownEl.innerHTML = markdownToHtml(markdown);
+        markdownEl.classList.add("is-visible");
+        statusEl.style.display = "none";
+      } catch (error) {
+        markdownEl.classList.remove("is-visible");
+        showStatus(
+          `<strong>Preview unavailable.</strong> Your browser blocked loading <code>${doc.path}</code> directly. Use <a href="${doc.path}">Open Raw File</a> or serve the repo with <code>python3 -m http.server</code>.`
+        );
+      }
+    }
+
+    const initial = new URL(window.location.href).searchParams.get("doc") || "README.md";
+    loadDoc(initial);
+  </script>
+</body>
+</html>

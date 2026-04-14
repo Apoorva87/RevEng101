@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude OAuth Flow - How It Works</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    line-height: 1.7;
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 2rem;
+    color: #d4a574;
+    border-bottom: 2px solid #21262d;
+    padding-bottom: 0.8rem;
+    margin-bottom: 1.5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    color: #e8b88a;
+    margin: 2rem 0 0.8rem;
+  }
+  p, li { font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .subtitle { color: #8b949e; font-size: 1rem; margin-top: -1rem; margin-bottom: 2rem; }
+  code {
+    background: #161b22;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #ff7b72;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* -- Sequence Diagram -- */
+  .diagram {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+  .diagram svg { display: block; margin: 0 auto; }
+
+  /* -- Flow Steps -- */
+  .step {
+    display: flex;
+    gap: 1rem;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #161b22;
+    border-left: 3px solid #d4a574;
+    border-radius: 0 8px 8px 0;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    background: #d4a574;
+    color: #0d1117;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.9rem;
+  }
+  .step-body { flex: 1; }
+  .step-body strong { color: #e8b88a; }
+
+  /* -- Analogy Box -- */
+  .analogy {
+    background: #1c2333;
+    border: 1px solid #d4a574;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin: 1.5rem 0;
+  }
+  .analogy-title {
+    color: #e8b88a;
+    font-weight: bold;
+    font-size: 1rem;
+    margin-bottom: 0.3rem;
+  }
+
+  /* -- Gotcha Box -- */
+  .gotcha {
+    background: #2a1a1a;
+    border: 1px solid #f85149;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin: 1.5rem 0;
+  }
+  .gotcha-title {
+    color: #f85149;
+    font-weight: bold;
+    margin-bottom: 0.3rem;
+  }
+
+  /* -- Discovery Box -- */
+  .discovery {
+    background: #0d2818;
+    border: 1px solid #238636;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin: 1.5rem 0;
+  }
+  .discovery-title {
+    color: #238636;
+    font-weight: bold;
+    margin-bottom: 0.3rem;
+  }
+
+  /* -- Token Table -- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  th {
+    background: #21262d;
+    color: #d4a574;
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+  }
+  td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid #21262d;
+  }
+
+  /* -- PKCE Box -- */
+  .pkce-box {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.5rem;
+    align-items: center;
+    text-align: center;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #161b22;
+    border-radius: 8px;
+  }
+  .pkce-box .arrow { color: #238636; font-size: 1.5rem; }
+  .pkce-box .box {
+    padding: 0.8rem;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #0d1117;
+  }
+  .pkce-box .box-label { font-size: 0.75rem; color: #8b949e; }
+  .pkce-box .box-val { color: #ffa657; font-family: monospace; font-size: 0.8rem; word-break: break-all; }
+
+  /* -- Comparison Grid -- */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+  .compare-card {
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+  }
+  .compare-card.openai { background: #0d1820; border-color: #1f6feb; }
+  .compare-card.claude { background: #1a1510; border-color: #d4a574; }
+  .compare-card .label { font-weight: bold; font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .compare-card .url { font-family: monospace; font-size: 0.8rem; color: #ffa657; }
+
+  /* -- Nav links -- */
+  .nav-link {
+    display: inline-block;
+    color: #58a6ff;
+    text-decoration: none;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+  .nav-link:hover { text-decoration: underline; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid #21262d;
+    color: #484f58;
+    font-size: 0.8rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<a href="openai_auth_explained.html" class="nav-link">&larr; OpenAI OAuth Flow</a>
+
+<h1>Claude OAuth Flow: How It Actually Works</h1>
+<p class="subtitle">Reverse-engineered from Claude Code CLI v2.1.105 (Bun binary) and confirmed against live endpoints. April 2026.</p>
+
+<!-- ════════════════════════════════════════════ -->
+<div class="analogy">
+  <div class="analogy-title">The Concert Wristband Analogy</div>
+  <p>Getting into a concert venue works like this:</p>
+  <ol style="margin: 0.5rem 0 0 1.5rem;">
+    <li><strong>You show your ticket at the gate</strong> (browser login at claude.com)</li>
+    <li><strong>They give you a wristband</strong> valid for tonight's show (access_token, ~8 hours)</li>
+    <li><strong>You also get a stamp</strong> on your hand (refresh_token) to get back in if you step out</li>
+    <li><strong>The stamp is single-use</strong> &mdash; each re-entry replaces it with a new stamp</li>
+  </ol>
+  <p style="margin-top: 0.5rem;">PKCE is like the bouncer asking for the other half of a
+  torn ticket &mdash; only the person who originally requested entry has the matching half.</p>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>The Big Picture</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg" style="max-width:900px">
+  <!-- Column headers -->
+  <text x="100" y="30" fill="#d4a574" font-size="14" font-weight="bold" text-anchor="middle">scripts/auth/setup.sh</text>
+  <text x="350" y="30" fill="#d4a574" font-size="14" font-weight="bold" text-anchor="middle">Browser</text>
+  <text x="600" y="30" fill="#d4a574" font-size="14" font-weight="bold" text-anchor="middle">claude.com</text>
+  <text x="810" y="30" fill="#d4a574" font-size="14" font-weight="bold" text-anchor="middle">Anthropic API</text>
+
+  <!-- Lifelines -->
+  <line x1="100" y1="45" x2="100" y2="500" stroke="#30363d" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="350" y1="45" x2="350" y2="500" stroke="#30363d" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="600" y1="45" x2="600" y2="500" stroke="#30363d" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="810" y1="45" x2="810" y2="500" stroke="#30363d" stroke-width="2" stroke-dasharray="6,4"/>
+
+  <!-- Step 1: Generate PKCE -->
+  <rect x="30" y="60" width="140" height="30" rx="4" fill="#d4a574" opacity="0.2"/>
+  <text x="100" y="80" fill="#e8b88a" font-size="11" text-anchor="middle">Generate PKCE pair</text>
+
+  <!-- Step 2: Open browser -->
+  <line x1="100" y1="110" x2="345" y2="110" stroke="#ffa657" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="220" y="105" fill="#ffa657" font-size="10" text-anchor="middle">open authorize URL</text>
+  <text x="220" y="127" fill="#8b949e" font-size="9" text-anchor="middle">/cai/oauth/authorize?code=true&amp;code_challenge=...</text>
+
+  <!-- Step 3: Browser to Claude -->
+  <line x1="355" y1="150" x2="595" y2="150" stroke="#ffa657" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="475" y="145" fill="#ffa657" font-size="10" text-anchor="middle">user sees login page</text>
+
+  <!-- Step 4: User logs in -->
+  <rect x="530" y="170" width="140" height="30" rx="4" fill="#1f6feb" opacity="0.3"/>
+  <text x="600" y="190" fill="#79c0ff" font-size="11" text-anchor="middle">User logs in</text>
+
+  <!-- Step 5: Redirect back -->
+  <line x1="595" y1="220" x2="355" y2="220" stroke="#ffa657" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="475" y="215" fill="#ffa657" font-size="10" text-anchor="middle">302 redirect</text>
+
+  <line x1="345" y1="240" x2="105" y2="240" stroke="#ffa657" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="220" y="235" fill="#ffa657" font-size="10" text-anchor="middle">/callback?code=SkfNVsJ...</text>
+  <text x="220" y="255" fill="#8b949e" font-size="9" text-anchor="middle">localhost:{dynamic port} captures the code</text>
+
+  <!-- Step 6: Exchange code -->
+  <rect x="30" y="270" width="140" height="18" rx="4" fill="#d4a574" opacity="0.15"/>
+  <text x="100" y="284" fill="#e8b88a" font-size="10" text-anchor="middle">got code!</text>
+
+  <line x1="100" y1="305" x2="595" y2="305" stroke="#da3633" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="350" y="300" fill="#da3633" font-size="11" text-anchor="middle" font-weight="bold">POST /v1/oauth/token (JSON body)</text>
+  <text x="350" y="320" fill="#8b949e" font-size="9" text-anchor="middle">{ grant_type, code, code_verifier, client_id, state }</text>
+
+  <!-- Step 7: Tokens + account info back -->
+  <line x1="595" y1="350" x2="105" y2="350" stroke="#238636" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="350" y="345" fill="#238636" font-size="11" text-anchor="middle" font-weight="bold">{ access_token, refresh_token, account, organization }</text>
+
+  <!-- Step 8: Use token -->
+  <rect x="30" y="370" width="140" height="18" rx="4" fill="#d4a574" opacity="0.15"/>
+  <text x="100" y="384" fill="#e8b88a" font-size="10" text-anchor="middle">got tokens!</text>
+
+  <line x1="100" y1="405" x2="805" y2="405" stroke="#a371f7" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="450" y="400" fill="#a371f7" font-size="11" text-anchor="middle">Authorization: Bearer {access_token}</text>
+  <text x="450" y="420" fill="#8b949e" font-size="9" text-anchor="middle">+ anthropic-beta: oauth-2025-04-20</text>
+
+  <!-- Step 9: Later - refresh -->
+  <rect x="20" y="445" width="160" height="18" rx="4" fill="#1f6feb" opacity="0.15"/>
+  <text x="100" y="459" fill="#79c0ff" font-size="10" text-anchor="middle">8 hours later...</text>
+
+  <line x1="100" y1="475" x2="595" y2="475" stroke="#ffa657" stroke-width="2" marker-end="url(#arr)" stroke-dasharray="6,3"/>
+  <text x="350" y="470" fill="#ffa657" font-size="10" text-anchor="middle">POST /v1/oauth/token (refresh_token) &rarr; new tokens</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Step by Step</h2>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <strong>Generate a PKCE pair</strong> &mdash; a random <code>code_verifier</code> (secret, stays in your script)
+    and its SHA-256 hash <code>code_challenge</code> (sent to Claude). Proves the same app that
+    started the login is the one finishing it.
+  </div>
+</div>
+
+<div class="pkce-box">
+  <div class="box">
+    <div class="box-label">code_verifier (secret, 43+ chars)</div>
+    <div class="box-val">-3L0nkExk-PJbzlZB6lUU0POw333...</div>
+  </div>
+  <div class="arrow">SHA-256 &rarr;</div>
+  <div class="box">
+    <div class="box-label">code_challenge (public)</div>
+    <div class="box-val">kTrdGLD-ltUgvUkVEkPRuVoh1ID7...</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <strong>Open browser</strong> to Claude's authorize URL at <code>claude.com/cai/oauth/authorize</code>.
+    The URL includes <code>code=true</code> (tells the auth page to return an authorization code),
+    <code>code_challenge</code>, <code>client_id</code>, and requested <code>scopes</code>.
+    The user sees the Claude login page.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <strong>User logs in</strong> at Claude (email, Google SSO, etc.). Claude verifies the user's identity.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <strong>Claude redirects</strong> the browser to <code>http://localhost:{port}/callback?code=SkfNVs...&state=xyz</code>.
+    Your local server captures this <code>code</code>. Unlike OpenAI (which is locked to port 1455),
+    Claude accepts <strong>any localhost port</strong> &mdash; the redirect_uri is registered dynamically.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <strong>Exchange the code</strong> for tokens via POST to
+    <code>platform.claude.com/v1/oauth/token</code>. The body is <strong>JSON</strong>
+    (not form-encoded!) with the <code>code</code>, <code>code_verifier</code>, <code>client_id</code>,
+    and <code>state</code>. Claude hashes the verifier, checks the match, and returns tokens.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">6</div>
+  <div class="step-body">
+    <strong>Use the tokens!</strong> The <code>access_token</code> (valid ~8 hours) goes in
+    <code>Authorization: Bearer</code> header. <strong>Critical:</strong> you must also send
+    <code>anthropic-beta: oauth-2025-04-20</code> or the API rejects OAuth tokens.
+    The response also includes <code>account.email_address</code> and <code>organization</code> info directly.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>What You Get Back</h2>
+
+<table>
+  <tr>
+    <th>Token</th>
+    <th>What It Is</th>
+    <th>Lifetime</th>
+    <th>Notes</th>
+  </tr>
+  <tr>
+    <td><code>access_token</code></td>
+    <td>Bearer token for API calls (<code>sk-ant-oat01-...</code>)</td>
+    <td>~8 hours</td>
+    <td>Requires <code>anthropic-beta: oauth-2025-04-20</code> header</td>
+  </tr>
+  <tr>
+    <td><code>refresh_token</code></td>
+    <td>Token to get new access tokens (<code>sk-ant-ort01-...</code>)</td>
+    <td>Long-lived</td>
+    <td>Single-use: each refresh returns a new one</td>
+  </tr>
+  <tr>
+    <td><code>organization</code></td>
+    <td>JSON with org <code>uuid</code> and <code>name</code></td>
+    <td>&mdash;</td>
+    <td>Included directly in the token response (not in a JWT)</td>
+  </tr>
+  <tr>
+    <td><code>account</code></td>
+    <td>JSON with account <code>uuid</code> and <code>email_address</code></td>
+    <td>&mdash;</td>
+    <td>No need to decode JWTs to get user info</td>
+  </tr>
+</table>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Token Refresh</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 800 140" xmlns="http://www.w3.org/2000/svg" style="max-width:800px">
+  <!-- Refresh chain -->
+  <rect x="10" y="30" width="140" height="50" rx="6" fill="#21262d" stroke="#d4a574"/>
+  <text x="80" y="52" fill="#d4a574" font-size="10" text-anchor="middle">Login</text>
+  <text x="80" y="68" fill="#8b949e" font-size="9" text-anchor="middle">access_1 + refresh_1</text>
+
+  <line x1="155" y1="55" x2="195" y2="55" stroke="#ffa657" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="175" y="48" fill="#ffa657" font-size="8" text-anchor="middle">8 hours</text>
+
+  <rect x="200" y="30" width="140" height="50" rx="6" fill="#21262d" stroke="#ffa657"/>
+  <text x="270" y="52" fill="#ffa657" font-size="10" text-anchor="middle">Refresh (refresh_1)</text>
+  <text x="270" y="68" fill="#8b949e" font-size="9" text-anchor="middle">access_2 + refresh_2</text>
+
+  <line x1="345" y1="55" x2="385" y2="55" stroke="#ffa657" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="365" y="48" fill="#ffa657" font-size="8" text-anchor="middle">8 hours</text>
+
+  <rect x="390" y="30" width="140" height="50" rx="6" fill="#21262d" stroke="#ffa657"/>
+  <text x="460" y="52" fill="#ffa657" font-size="10" text-anchor="middle">Refresh (refresh_2)</text>
+  <text x="460" y="68" fill="#8b949e" font-size="9" text-anchor="middle">access_3 + refresh_3</text>
+
+  <line x1="535" y1="55" x2="575" y2="55" stroke="#ffa657" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="620" y="55" fill="#8b949e" font-size="12" text-anchor="middle">...</text>
+
+  <!-- Warning -->
+  <text x="400" y="105" fill="#f85149" font-size="11" text-anchor="middle">Each refresh_token is single-use. Reusing one revokes the chain.</text>
+  <text x="400" y="123" fill="#8b949e" font-size="10" text-anchor="middle">Refresh also uses JSON body. Rate limited by IP (not per-account!).</text>
+
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<div class="gotcha">
+  <div class="gotcha-title">IP-Based Rate Limiting on Token Refresh</div>
+  <p>The <code>platform.claude.com/v1/oauth/token</code> endpoint rate-limits by <strong>IP address</strong>,
+  not per-account. If you have multiple Claude accounts on one machine (via <code>CLAUDE_CONFIG_DIR</code>
+  isolation), a failed refresh for one account locks out ALL accounts from that IP. This was the
+  primary motivation for switching to long-lived API keys in OAuthModelRouter.</p>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>The Cloudflare Trap We Hit</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 800 220" xmlns="http://www.w3.org/2000/svg" style="max-width:800px">
+  <text x="400" y="22" fill="#f85149" font-size="14" font-weight="bold" text-anchor="middle">The User-Agent Trap</text>
+
+  <!-- Your script -->
+  <rect x="20" y="50" width="120" height="40" rx="6" fill="#21262d" stroke="#d4a574"/>
+  <text x="80" y="75" fill="#d4a574" font-size="11" text-anchor="middle">scripts/auth/setup.sh</text>
+
+  <!-- Cloudflare -->
+  <rect x="280" y="15" width="20" height="180" rx="2" fill="#f85149" opacity="0.3"/>
+  <text x="290" y="210" fill="#f85149" font-size="10" text-anchor="middle">Cloudflare</text>
+
+  <!-- Wrong UA (blocked) -->
+  <rect x="380" y="30" width="200" height="40" rx="6" fill="#2a1a1a" stroke="#f85149"/>
+  <text x="480" y="48" fill="#f85149" font-size="9" text-anchor="middle">User-Agent: claude-code/2.1.105</text>
+  <text x="480" y="62" fill="#8b949e" font-size="8" text-anchor="middle">(custom UA &mdash; flagged by Cloudflare)</text>
+
+  <line x1="140" y1="60" x2="275" y2="45" stroke="#f85149" stroke-width="2" marker-end="url(#arr4)"/>
+  <text x="200" y="42" fill="#f85149" font-size="9" text-anchor="middle">JSON POST</text>
+  <text x="265" y="35" fill="#f85149" font-size="16" font-weight="bold">X</text>
+  <text x="630" y="50" fill="#f85149" font-size="10">HTTP 429</text>
+
+  <!-- Right UA (works) -->
+  <rect x="380" y="120" width="200" height="40" rx="6" fill="#0d2818" stroke="#238636"/>
+  <text x="480" y="138" fill="#238636" font-size="9" text-anchor="middle">User-Agent: axios/1.13.6</text>
+  <text x="480" y="152" fill="#8b949e" font-size="8" text-anchor="middle">(axios default &mdash; known HTTP client)</text>
+
+  <line x1="140" y1="80" x2="375" y2="140" stroke="#238636" stroke-width="2" marker-end="url(#arr4)"/>
+  <text x="240" y="125" fill="#238636" font-size="9" text-anchor="middle">JSON POST</text>
+  <text x="630" y="140" fill="#238636" font-size="10">HTTP 200</text>
+
+  <!-- Key insight -->
+  <rect x="150" y="185" width="500" height="22" rx="4" fill="#161b22" stroke="#ffa657"/>
+  <text x="400" y="200" fill="#ffa657" font-size="10" text-anchor="middle">Claude Code uses axios for token exchange &mdash; axios sets its own User-Agent, not "claude-code/..."</text>
+
+  <defs>
+    <marker id="arr4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<div class="discovery">
+  <div class="discovery-title">How We Discovered This</div>
+  <p>We spent hours debugging persistent 429 errors. The breakthrough came from intercepting a
+  successful Claude Code login and comparing headers. The <strong>only difference</strong> was
+  <code>User-Agent</code>:</p>
+  <ul style="margin: 0.5rem 0 0 1.5rem;">
+    <li><strong>Our script:</strong> <code>User-Agent: claude-code/2.1.105</code> &rarr; <span style="color:#f85149">429 every time</span></li>
+    <li><strong>Claude Code (via axios):</strong> <code>User-Agent: axios/1.13.6</code> &rarr; <span style="color:#238636">200 OK</span></li>
+  </ul>
+  <p style="margin-top:0.5rem;">The binary only sets <code>Content-Type: application/json</code> for
+  token requests. It does NOT override User-Agent &mdash; axios fills in its default. The
+  <code>claude-code/2.1.105</code> UA is used for API calls, not OAuth token exchange.</p>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+
+<h2>What Is Axios and Why Does It Matter Here?</h2>
+
+<div class="analogy">
+  <div class="analogy-title">Think of it like mailing a letter</div>
+  <p>Your code writes the letter (the JSON body with <code>grant_type</code>, <code>code</code>, etc.).
+  But it needs an envelope and a postal service to deliver it. <strong>Axios is the postal service</strong> &mdash;
+  it handles the actual HTTP transport: opening the TCP connection, setting default headers,
+  managing timeouts, following redirects, and parsing the response. When you hand axios a letter,
+  it stamps its own return address on the envelope (<code>User-Agent: axios/1.13.6</code>) unless you
+  explicitly tell it not to.</p>
+</div>
+
+<div class="step">
+  <div class="step-num">?</div>
+  <div class="step-body">
+    <strong>What is axios?</strong><br>
+    <a href="https://github.com/axios/axios" style="color:#58a6ff;">Axios</a> is a popular JavaScript/TypeScript
+    HTTP client library (50M+ weekly npm downloads). It wraps the lower-level <code>http</code>/<code>https</code>
+    modules in Node.js (or <code>XMLHttpRequest</code> in browsers) and provides a cleaner API:
+    automatic JSON serialization, request/response interceptors, timeout handling, and sensible defaults.
+    Claude Code&rsquo;s binary is compiled with <a href="https://bun.sh" style="color:#58a6ff;">Bun</a>,
+    but it still bundles axios as its HTTP client for token operations.
+  </div>
+</div>
+
+<div class="diagram">
+<svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" style="max-width:820px">
+  <text x="410" y="22" fill="#d4a574" font-size="14" font-weight="bold" text-anchor="middle">What Axios Does Under the Hood</text>
+
+  <!-- Your Code box -->
+  <rect x="20" y="50" width="160" height="50" rx="8" fill="#21262d" stroke="#d4a574"/>
+  <text x="100" y="72" fill="#d4a574" font-size="11" text-anchor="middle">Your Code</text>
+  <text x="100" y="88" fill="#8b949e" font-size="9" text-anchor="middle">f6.post(url, body)</text>
+
+  <!-- Arrow: Your Code -> Axios -->
+  <line x1="180" y1="75" x2="245" y2="75" stroke="#d4a574" stroke-width="2" marker-end="url(#arr-ax1)"/>
+  <text x="212" y="66" fill="#8b949e" font-size="8" text-anchor="middle">JS object</text>
+
+  <!-- Axios box (big) -->
+  <rect x="250" y="35" width="300" height="280" rx="10" fill="#161b22" stroke="#e8b88a" stroke-width="2"/>
+  <text x="400" y="56" fill="#e8b88a" font-size="12" font-weight="bold" text-anchor="middle">axios 1.13.6</text>
+
+  <!-- Internal steps inside axios -->
+  <rect x="270" y="70" width="260" height="30" rx="5" fill="#0d2818" stroke="#238636" stroke-dasharray="4"/>
+  <text x="400" y="90" fill="#238636" font-size="9" text-anchor="middle">1. Serialize body &#x2192; JSON string</text>
+
+  <rect x="270" y="110" width="260" height="44" rx="5" fill="#0d2818" stroke="#238636" stroke-dasharray="4"/>
+  <text x="400" y="128" fill="#238636" font-size="9" text-anchor="middle">2. Set default headers:</text>
+  <text x="400" y="146" fill="#ffa657" font-size="9" text-anchor="middle">User-Agent: axios/1.13.6</text>
+
+  <rect x="270" y="164" width="260" height="30" rx="5" fill="#0d2818" stroke="#238636" stroke-dasharray="4"/>
+  <text x="400" y="184" fill="#238636" font-size="9" text-anchor="middle">3. Merge caller headers (Content-Type: application/json)</text>
+
+  <rect x="270" y="204" width="260" height="30" rx="5" fill="#0d2818" stroke="#238636" stroke-dasharray="4"/>
+  <text x="400" y="224" fill="#238636" font-size="9" text-anchor="middle">4. Open HTTPS connection + TLS handshake</text>
+
+  <rect x="270" y="244" width="260" height="30" rx="5" fill="#0d2818" stroke="#238636" stroke-dasharray="4"/>
+  <text x="400" y="264" fill="#238636" font-size="9" text-anchor="middle">5. Send request, parse response as JSON</text>
+
+  <rect x="270" y="284" width="260" height="22" rx="5" fill="#21262d" stroke="#8b949e" stroke-dasharray="4"/>
+  <text x="400" y="300" fill="#8b949e" font-size="9" text-anchor="middle">6. Handle errors, timeouts (15s), retries</text>
+
+  <!-- Arrow: Axios -> Server -->
+  <line x1="555" y1="160" x2="620" y2="160" stroke="#238636" stroke-width="2" marker-end="url(#arr-ax1)"/>
+
+  <!-- Server box -->
+  <rect x="625" y="120" width="170" height="80" rx="8" fill="#21262d" stroke="#58a6ff"/>
+  <text x="710" y="148" fill="#58a6ff" font-size="11" text-anchor="middle">platform.claude.com</text>
+  <text x="710" y="168" fill="#8b949e" font-size="9" text-anchor="middle">/v1/oauth/token</text>
+  <text x="710" y="186" fill="#8b949e" font-size="8" text-anchor="middle">(behind Cloudflare)</text>
+
+  <defs>
+    <marker id="arr-ax1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<h3 style="color:#e8b88a; margin-top:1.5rem;">Why Claude Code Uses Axios (Not Fetch)</h3>
+
+<p>Modern JavaScript has a built-in <code>fetch()</code> API, and Bun natively supports it. So why does
+Claude Code bundle a third-party library? A few reasons:</p>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0;">
+  <div class="step" style="border-left-color:#58a6ff; flex-direction:column;">
+    <strong style="color:#58a6ff;">fetch()</strong>
+    <ul style="margin:0.3rem 0 0 1.2rem; font-size:0.85rem;">
+      <li>Built-in, zero dependencies</li>
+      <li>No default <code>User-Agent</code></li>
+      <li>Returns a <code>Response</code> object &mdash; must call <code>.json()</code> manually</li>
+      <li>No timeout support (need <code>AbortController</code>)</li>
+      <li>No request/response interceptors</li>
+      <li>Does not throw on 4xx/5xx &mdash; must check <code>response.ok</code></li>
+    </ul>
+  </div>
+  <div class="step" style="border-left-color:#e8b88a; flex-direction:column;">
+    <strong style="color:#e8b88a;">axios</strong>
+    <ul style="margin:0.3rem 0 0 1.2rem; font-size:0.85rem;">
+      <li>~50 KB bundled, mature ecosystem</li>
+      <li>Sets <code>User-Agent: axios/1.13.6</code> by default</li>
+      <li>Auto-serializes JS objects to JSON</li>
+      <li>Built-in <code>timeout</code> option (Claude Code uses 15s)</li>
+      <li>Interceptors for auth headers, logging, retries</li>
+      <li>Throws on 4xx/5xx &mdash; natural try/catch error handling</li>
+    </ul>
+  </div>
+</div>
+
+<h3 style="color:#e8b88a; margin-top:1.5rem;">The Accidental Security Feature</h3>
+
+<div class="gotcha">
+  <div class="gotcha-title">Axios&rsquo;s default User-Agent accidentally bypasses Cloudflare rate limiting</div>
+  <p>Here&rsquo;s the chain of events that makes this work:</p>
+  <ol style="margin:0.5rem 0 0 1.5rem; font-size:0.9rem;">
+    <li>Claude Code&rsquo;s token exchange calls <code>f6.post(url, body, {headers: {"Content-Type": "application/json"}, timeout: 15000})</code></li>
+    <li>Notice: <strong>no <code>User-Agent</code></strong> in the explicit headers</li>
+    <li>Axios fills in its default: <code>User-Agent: axios/1.13.6</code></li>
+    <li>Cloudflare sees a <strong>known HTTP client library</strong> UA and lets it through</li>
+    <li>If you set <code>User-Agent: claude-code/2.1.105</code> (or any custom string), Cloudflare treats
+    it as a bot/scraper and aggressively rate-limits with 429</li>
+  </ol>
+  <p style="margin-top:0.5rem;">The <code>claude-code/2.1.105</code> UA (built by the <code>K9H()</code> function in the binary) is
+  used for <em>API calls</em> to <code>api.anthropic.com</code>, which has different Cloudflare rules. The
+  OAuth token endpoint at <code>platform.claude.com</code> is stricter. Because the Claude Code developers
+  used axios and <strong>didn&rsquo;t bother overriding the User-Agent for token calls</strong>, the default
+  axios UA became the &ldquo;correct&rdquo; one.</p>
+</div>
+
+<h3 style="color:#e8b88a; margin-top:1.5rem;">What This Means for Your Scripts</h3>
+
+<p>If you&rsquo;re writing your own tool that needs to exchange tokens with <code>platform.claude.com</code>,
+you <strong>must</strong> set the User-Agent to a known HTTP client library. The safest options:</p>
+
+<table>
+  <tr><th>User-Agent Value</th><th>Works?</th><th>Why</th></tr>
+  <tr><td><code>axios/1.13.6</code></td><td style="color:#238636">Yes</td><td>Exact match for what Claude Code sends</td></tr>
+  <tr><td><code>python-requests/2.32.3</code></td><td style="color:#238636">Yes</td><td>Known HTTP client library</td></tr>
+  <tr><td><code>node-fetch/1.0</code></td><td style="color:#238636">Likely</td><td>Known HTTP client library</td></tr>
+  <tr><td><code>curl/8.7.1</code></td><td style="color:#ffa657">Varies</td><td>Sometimes rate-limited, sometimes not</td></tr>
+  <tr><td><code>my-cool-tool/1.0</code></td><td style="color:#f85149">No</td><td>Unknown &mdash; Cloudflare flags as bot</td></tr>
+  <tr><td><code>claude-code/2.1.105</code></td><td style="color:#f85149">No</td><td>Ironically, Claude&rsquo;s own branded UA gets blocked on the OAuth endpoint</td></tr>
+  <tr><td>(no User-Agent)</td><td style="color:#f85149">No</td><td>Missing UA is suspicious to Cloudflare</td></tr>
+</table>
+
+<div class="analogy" style="margin-top:1rem;">
+  <div class="analogy-title">The takeaway</div>
+  <p>Axios isn&rsquo;t just an HTTP convenience wrapper here &mdash; its <strong>default User-Agent is load-bearing</strong>.
+  Without it, the entire OAuth flow breaks. This is almost certainly unintentional on Anthropic&rsquo;s part:
+  the Cloudflare rules were likely set up to block scrapers and bots, and nobody noticed that the rule
+  also catches Claude Code&rsquo;s own branded UA because the code never sends it to that endpoint.
+  The lesson: when reverse-engineering auth flows, <strong>don&rsquo;t just capture the body &mdash; capture every header</strong>,
+  especially the ones set by the HTTP library, not the application.</p>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Claude vs. OpenAI: Side-by-Side Comparison</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 900 600" xmlns="http://www.w3.org/2000/svg" style="max-width:900px">
+  <!-- Title -->
+  <text x="450" y="25" fill="#c9d1d9" font-size="15" font-weight="bold" text-anchor="middle">Two OAuth Flows, One Purpose, Many Differences</text>
+
+  <!-- Headers -->
+  <rect x="30" y="45" width="400" height="30" rx="6" fill="#1f6feb" opacity="0.15"/>
+  <text x="230" y="65" fill="#58a6ff" font-size="13" font-weight="bold" text-anchor="middle">OpenAI (Codex CLI)</text>
+  <rect x="470" y="45" width="400" height="30" rx="6" fill="#d4a574" opacity="0.15"/>
+  <text x="670" y="65" fill="#d4a574" font-size="13" font-weight="bold" text-anchor="middle">Claude (Claude Code)</text>
+
+  <!-- Divider -->
+  <line x1="450" y1="45" x2="450" y2="585" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Row labels + values -->
+  <!-- Authorize URL -->
+  <text x="450" y="102" fill="#8b949e" font-size="10" text-anchor="middle">Authorize URL</text>
+  <rect x="40" y="108" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="123" fill="#58a6ff" font-size="9" font-family="monospace" text-anchor="middle">auth.openai.com/oauth/authorize</text>
+  <rect x="480" y="108" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="123" fill="#d4a574" font-size="9" font-family="monospace" text-anchor="middle">claude.com/cai/oauth/authorize</text>
+
+  <!-- Token URL -->
+  <text x="450" y="152" fill="#8b949e" font-size="10" text-anchor="middle">Token URL</text>
+  <rect x="40" y="158" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="173" fill="#58a6ff" font-size="9" font-family="monospace" text-anchor="middle">auth.openai.com/oauth/token</text>
+  <rect x="480" y="158" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="173" fill="#d4a574" font-size="9" font-family="monospace" text-anchor="middle">platform.claude.com/v1/oauth/token</text>
+
+  <!-- Client ID -->
+  <text x="450" y="202" fill="#8b949e" font-size="10" text-anchor="middle">Client ID</text>
+  <rect x="40" y="208" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="223" fill="#ffa657" font-size="9" font-family="monospace" text-anchor="middle">app_EMoamEEZ73f0CkXaXp7hrann</text>
+  <rect x="480" y="208" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="223" fill="#ffa657" font-size="9" font-family="monospace" text-anchor="middle">9d1c250a-e61b-44d9-88ed-5944d1962f5e</text>
+
+  <!-- Redirect Port -->
+  <text x="450" y="252" fill="#8b949e" font-size="10" text-anchor="middle">Redirect Port</text>
+  <rect x="40" y="258" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="273" fill="#f85149" font-size="10" text-anchor="middle">Fixed: 1455 only</text>
+  <rect x="480" y="258" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="273" fill="#238636" font-size="10" text-anchor="middle">Dynamic: any port works</text>
+
+  <!-- Token Exchange Format -->
+  <text x="450" y="302" fill="#8b949e" font-size="10" text-anchor="middle">Code Exchange Format</text>
+  <rect x="40" y="308" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="323" fill="#58a6ff" font-size="10" text-anchor="middle">application/x-www-form-urlencoded</text>
+  <rect x="480" y="308" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="323" fill="#d4a574" font-size="10" text-anchor="middle">application/json</text>
+
+  <!-- Token Lifetime -->
+  <text x="450" y="352" fill="#8b949e" font-size="10" text-anchor="middle">Access Token Lifetime</text>
+  <rect x="40" y="358" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="373" fill="#58a6ff" font-size="10" text-anchor="middle">~10 days (864,000s)</text>
+  <rect x="480" y="358" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="373" fill="#d4a574" font-size="10" text-anchor="middle">~8 hours (28,800s)</text>
+
+  <!-- Extra Headers -->
+  <text x="450" y="402" fill="#8b949e" font-size="10" text-anchor="middle">Extra API Headers</text>
+  <rect x="40" y="408" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="423" fill="#8b949e" font-size="10" text-anchor="middle">None required</text>
+  <rect x="480" y="408" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="423" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">anthropic-beta: oauth-2025-04-20</text>
+
+  <!-- Token Format -->
+  <text x="450" y="452" fill="#8b949e" font-size="10" text-anchor="middle">Access Token Format</text>
+  <rect x="40" y="458" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="473" fill="#58a6ff" font-size="10" text-anchor="middle">JWT (contains email, plan, account_id)</text>
+  <rect x="480" y="458" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="473" fill="#d4a574" font-size="10" text-anchor="middle">Opaque (sk-ant-oat01-...)</text>
+
+  <!-- User Info -->
+  <text x="450" y="502" fill="#8b949e" font-size="10" text-anchor="middle">User Info Source</text>
+  <rect x="40" y="508" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="523" fill="#58a6ff" font-size="10" text-anchor="middle">Decode the JWT payload</text>
+  <rect x="480" y="508" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="523" fill="#d4a574" font-size="10" text-anchor="middle">account + organization in token response</text>
+
+  <!-- Cloudflare -->
+  <text x="450" y="552" fill="#8b949e" font-size="10" text-anchor="middle">Cloudflare Protection</text>
+  <rect x="40" y="558" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="230" y="573" fill="#238636" font-size="10" text-anchor="middle">auth.openai.com: None (curl works)</text>
+  <rect x="480" y="558" width="380" height="22" rx="3" fill="#161b22"/>
+  <text x="670" y="573" fill="#ffa657" font-size="10" text-anchor="middle">platform.claude.com: Yes (needs axios UA)</text>
+</svg>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>The Surprising Differences</h2>
+
+<div class="analogy">
+  <div class="analogy-title">Same Protocol (OAuth 2.0 + PKCE), Very Different Implementations</div>
+  <p>Both flows follow RFC 6749 and RFC 7636, but diverge in almost every detail:</p>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card openai">
+    <div class="label" style="color:#58a6ff">OpenAI: Form-Encoded Exchange</div>
+    <p>The token exchange uses <code>application/x-www-form-urlencoded</code> &mdash;
+    standard per the OAuth spec. This is what most OAuth implementations use.</p>
+    <p style="margin-top:0.5rem; color:#ffa657;">But refresh uses JSON! Two different
+    content types for the same endpoint.</p>
+  </div>
+  <div class="compare-card claude">
+    <div class="label" style="color:#d4a574">Claude: JSON Everything</div>
+    <p>Both code exchange AND refresh use <code>application/json</code>.
+    Non-standard but consistent. This is critical &mdash;
+    sending form-encoded to Claude's token endpoint triggers Cloudflare rate limiting.</p>
+  </div>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card openai">
+    <div class="label" style="color:#58a6ff">OpenAI: Fixed Port 1455</div>
+    <p>The redirect URI <code>localhost:1455</code> is hardcoded in OpenAI's OAuth client
+    registration. Any other port returns <code>unknown_error</code>. If port 1455 is
+    occupied, the login fails.</p>
+  </div>
+  <div class="compare-card claude">
+    <div class="label" style="color:#d4a574">Claude: Dynamic Port</div>
+    <p>Claude accepts any localhost port in the redirect_uri. The script picks a port,
+    binds to it, and sends that in the authorize URL. More flexible &mdash; no port
+    conflicts possible.</p>
+  </div>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card openai">
+    <div class="label" style="color:#58a6ff">OpenAI: JWT Access Tokens</div>
+    <p>The access_token is a JWT you can decode to find email, plan type, and account ID.
+    Lasts ~10 days. Contains <code>https://api.openai.com/auth</code> claims.</p>
+  </div>
+  <div class="compare-card claude">
+    <div class="label" style="color:#d4a574">Claude: Opaque Tokens + Metadata</div>
+    <p>The access_token (<code>sk-ant-oat01-...</code>) is opaque &mdash; you can't decode it.
+    Lasts only ~8 hours. But the token response includes <code>account</code> and
+    <code>organization</code> objects with email and org info.</p>
+  </div>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card openai">
+    <div class="label" style="color:#58a6ff">OpenAI: No Cloudflare on Token Endpoint</div>
+    <p><code>auth.openai.com/oauth/token</code> has zero Cloudflare protection. Any
+    <code>curl</code> command works. The trap is that OIDC discovery points to
+    <code>auth0.openai.com</code> which IS behind Cloudflare.</p>
+  </div>
+  <div class="compare-card claude">
+    <div class="label" style="color:#d4a574">Claude: Cloudflare + UA Filtering</div>
+    <p><code>platform.claude.com</code> is behind Cloudflare. It accepts known HTTP
+    client UAs like <code>axios/1.13.6</code> but rate-limits custom UAs. Claude Code's
+    binary only sets <code>Content-Type</code> &mdash; axios provides its own default UA.</p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Claude-Specific Gotchas</h2>
+
+<div class="gotcha">
+  <div class="gotcha-title">The <code>code=true</code> Parameter</div>
+  <p>Claude's authorize URL requires <code>code=true</code> as a query parameter. Without it,
+  the auth page may not return an authorization code. This is not standard OAuth &mdash;
+  it's Claude-specific. It tells the Claude auth SPA to use the authorization code flow
+  rather than an implicit or session-based flow.</p>
+</div>
+
+<div class="gotcha">
+  <div class="gotcha-title">The <code>anthropic-beta</code> Header</div>
+  <p>The Anthropic API <strong>rejects OAuth tokens</strong> unless you include
+  <code>anthropic-beta: oauth-2025-04-20</code> in every API request. Without it, you get:
+  <code>"OAuth authentication is currently not supported"</code>. API keys don't need this header.
+  The router automatically injects it for all Claude proxy requests.</p>
+</div>
+
+<div class="gotcha">
+  <div class="gotcha-title">Scope Filtering: <code>org:create_api_key</code></div>
+  <p>You can <em>request</em> <code>org:create_api_key</code> in the authorize URL, but the
+  auth server <strong>does not grant it</strong>. The granted scopes are:
+  <code>user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload</code>.
+  This means you cannot programmatically create long-lived API keys through this flow.</p>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Scopes</h2>
+
+<table>
+  <tr><th>Scope</th><th>What It Means</th><th>Granted?</th></tr>
+  <tr>
+    <td><code>user:profile</code></td>
+    <td>Access to user profile information</td>
+    <td style="color:#238636">Yes</td>
+  </tr>
+  <tr>
+    <td><code>user:inference</code></td>
+    <td>Permission to make API calls (chat, completions)</td>
+    <td style="color:#238636">Yes</td>
+  </tr>
+  <tr>
+    <td><code>user:sessions:claude_code</code></td>
+    <td>Create and manage Claude Code sessions</td>
+    <td style="color:#238636">Yes</td>
+  </tr>
+  <tr>
+    <td><code>user:mcp_servers</code></td>
+    <td>Access MCP (Model Context Protocol) servers</td>
+    <td style="color:#238636">Yes</td>
+  </tr>
+  <tr>
+    <td><code>user:file_upload</code></td>
+    <td>Upload files for context</td>
+    <td style="color:#238636">Yes</td>
+  </tr>
+  <tr>
+    <td><code>org:create_api_key</code></td>
+    <td>Create long-lived API keys programmatically</td>
+    <td style="color:#f85149">No (requested but filtered)</td>
+  </tr>
+</table>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Quick Reference</h2>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th></tr>
+  <tr><td>Client ID</td><td><code>9d1c250a-e61b-44d9-88ed-5944d1962f5e</code></td></tr>
+  <tr><td>Authorize URL</td><td><code>https://claude.com/cai/oauth/authorize</code></td></tr>
+  <tr><td>Token URL</td><td><code>https://platform.claude.com/v1/oauth/token</code></td></tr>
+  <tr><td>API Key URL</td><td><code>https://api.anthropic.com/api/oauth/claude_cli/create_api_key</code> (requires <code>org:create_api_key</code> scope)</td></tr>
+  <tr><td>Redirect URI</td><td><code>http://localhost:{any_port}/callback</code></td></tr>
+  <tr><td>Scopes</td><td><code>user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload</code></td></tr>
+  <tr><td>PKCE Method</td><td>S256 (SHA-256)</td></tr>
+  <tr><td>Code exchange</td><td>JSON (<code>application/json</code>)</td></tr>
+  <tr><td>Token refresh</td><td>JSON (<code>application/json</code>)</td></tr>
+  <tr><td>User-Agent (token exchange)</td><td><code>axios/1.13.6</code> (must match &mdash; Cloudflare blocks custom UAs)</td></tr>
+  <tr><td>Required API header</td><td><code>anthropic-beta: oauth-2025-04-20</code></td></tr>
+  <tr><td>Credential storage</td><td>macOS Keychain: <code>Claude Code-credentials</code> service</td></tr>
+</table>
+
+<!-- ════════════════════════════════════════════ -->
+<h2>Binary Source References</h2>
+
+<p>Extracted from Claude Code v2.1.105 (Bun-compiled Mach-O binary at <code>~/.local/bin/claude</code>):</p>
+
+<table>
+  <tr><th>What</th><th>Where in Binary</th></tr>
+  <tr><td>OAuth config constants</td><td><code>o8()</code> function &mdash; BASE_API_URL, TOKEN_URL, CLIENT_ID, etc.</td></tr>
+  <tr><td>Authorize URL construction</td><td><code>Y.searchParams.append("code","true")...</code></td></tr>
+  <tr><td>Token exchange</td><td><code>GR6()</code> function &mdash; <code>f6.post(o8().TOKEN_URL, $, {headers:{"Content-Type":"application/json"}})</code></td></tr>
+  <tr><td>Token refresh</td><td><code>f6.post(o8().TOKEN_URL, {grant_type:"refresh_token", ...})</code></td></tr>
+  <tr><td>Credential storage</td><td><code>nZH()</code> function &mdash; writes <code>claudeAiOauth</code> to keychain</td></tr>
+  <tr><td>Scopes</td><td><code>$D_=[hTH,iC,"user:sessions:claude_code","user:mcp_servers","user:file_upload"]</code></td></tr>
+  <tr><td>User-Agent (API calls)</td><td><code>K9H()</code> &rarr; <code>"claude-code/2.1.105"</code> (NOT used for token exchange)</td></tr>
+</table>
+
+<footer>
+  Reverse-engineered from Claude Code v2.1.105 (Bun binary, <code>strings</code> + live endpoint testing) &mdash; April 2026
+  <br><a href="openai_auth_explained.html" style="color:#58a6ff;">OpenAI OAuth Flow</a> &nbsp;|&nbsp;
+  <a href="pkce_code_interception.html" style="color:#58a6ff;">PKCE Deep Dive</a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Test and tooling caches
+.pytest_cache/
+.playwright-mcp/
+
+# Local environments
+.venv/
+venv/
+.claude/
+
+# Local runtime and debug artifacts
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS noise
+.DS_Store
+
+.claude/
+.codex/
