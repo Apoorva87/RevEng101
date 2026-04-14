@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 import threading
 import uuid
 import webbrowser
@@ -46,6 +48,7 @@ from usage_hub import (
     discover_claude_client_id,
     discover_claude_oauth,
     discover_codex_oauth,
+    security_find_password,
     format_countdown,
     format_relative,
     merge_accounts,
@@ -99,6 +102,96 @@ def normalize_models(raw: Any, provider: str) -> list[str]:
 
 
 MAX_EVENT_LOG_ENTRIES = 200
+
+
+_KEYCHAIN_KEYWORDS = ("claude", "codex", "anthropic", "openai")
+
+
+def _extract_oauth_from_payload(payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Try to extract claudeAiOauth from a keychain payload, handling base64 wrappers."""
+    oauth = (payload.get("claudeAiOauth") or {})
+    if oauth and str(oauth.get("accessToken") or "").strip():
+        return oauth
+    # CodexBar-style wrapper: {"storedAt":..., "owner":..., "data": "<base64 json>"}
+    b64data = str(payload.get("data") or "").strip()
+    if b64data:
+        try:
+            import base64
+            decoded = json.loads(base64.b64decode(b64data))
+            if isinstance(decoded, dict):
+                oauth = decoded.get("claudeAiOauth") or {}
+                if oauth and str(oauth.get("accessToken") or "").strip():
+                    return oauth
+        except Exception:
+            pass
+    # Codex CLI tokens structure: {"tokens": {"access_token":..., "account_id":...}}
+    tokens = payload.get("tokens") or {}
+    if str(tokens.get("access_token") or "").strip():
+        token = str(tokens["access_token"]).strip()
+        return {
+            "accessToken": token,
+            "subscriptionType": None,
+            "_provider": "codex",
+        }
+    return None
+
+
+def scan_keychain_entries() -> list[dict[str, Any]]:
+    """Scan the macOS keychain for entries that look like Claude or Codex OAuth credentials."""
+    result = subprocess.run(
+        ["security", "dump-keychain"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    current_svce: Optional[str] = None
+    current_acct: Optional[str] = None
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        match_svce = re.match(r'"svce"<blob>="(.+)"', line)
+        match_acct = re.match(r'"acct"<blob>="(.+)"', line)
+        if match_svce:
+            current_svce = match_svce.group(1)
+        elif match_acct:
+            current_acct = match_acct.group(1)
+        elif line.startswith("class:") or line.startswith("keychain:"):
+            if current_svce and current_acct:
+                key = (current_svce, current_acct)
+                combined = (current_svce + current_acct).lower()
+                is_relevant = any(kw in combined for kw in _KEYCHAIN_KEYWORDS)
+                if is_relevant and key not in seen:
+                    seen.add(key)
+                    entry: dict[str, Any] = {
+                        "service": current_svce,
+                        "account": current_acct,
+                        "has_oauth": False,
+                        "subscription_type": None,
+                        "token_preview": None,
+                        "provider": None,
+                        "command": f"security find-generic-password -s {current_svce!r} -a {current_acct!r} -w",
+                    }
+                    raw = security_find_password(current_svce, current_acct)
+                    if raw:
+                        try:
+                            payload = json.loads(raw)
+                            oauth = _extract_oauth_from_payload(payload)
+                            if oauth:
+                                token = str(oauth.get("accessToken") or "").strip()
+                                entry["has_oauth"] = True
+                                entry["subscription_type"] = oauth.get("subscriptionType")
+                                entry["provider"] = oauth.get("_provider", "claude")
+                                entry["token_preview"] = f"{token[:12]}...{token[-6:]}" if len(token) > 18 else token[:8] + "..."
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    entries.append(entry)
+            current_svce = None
+            current_acct = None
+
+    return entries
 
 
 class DashboardApp:
@@ -227,6 +320,7 @@ class DashboardApp:
             refresh_interval=float(payload["refresh_interval"]) if payload.get("refresh_interval") not in {None, ""} else None,
             default_model=default_model,
             models=models,
+            email=str(payload.get("email") or "").strip() or None,
             source="saved",
             user_added=True,
         )
@@ -270,6 +364,7 @@ class DashboardApp:
 
             simple_fields = {
                 "name": str,
+                "email": str,
                 "enabled": bool,
                 "visible": bool,
                 "api_base": str,
@@ -310,8 +405,6 @@ class DashboardApp:
             state = self._state_map().get(account_id)
             if not state:
                 raise KeyError(f"Unknown account: {account_id}")
-            if not state.record.user_added:
-                raise ValueError("Built-in discovered accounts cannot be deleted. Hide them instead.")
             deleted_name = state.record.name
             self.store.accounts = [account for account in self.store.accounts if account.id != account_id]
             self.states = [item for item in self.states if item.record.id != account_id]
@@ -740,6 +833,7 @@ def html_page() -> str:
         <button class="btn btn-ghost btn-sm" data-mode="codex-api">OpenAI API</button>
         <button class="btn btn-ghost btn-sm" data-mode="claude-oauth">Claude OAuth</button>
         <button class="btn btn-ghost btn-sm" data-mode="codex-oauth">Codex OAuth</button>
+        <button class="btn btn-ghost btn-sm" data-mode="keychain-browse" style="border-color:var(--accent);">Browse Keychain</button>
       </div>
 
       <form id="account-form">
@@ -778,6 +872,7 @@ def html_page() -> str:
         subtitle: 'Probe Anthropic usage via API key.',
         fields: [
           ['name', 'Account label', 'text', 'Claude API'],
+          ['email', 'Email / Gmail', 'email', ''],
           ['api_key', 'API key', 'password', ''],
           ['models', 'Models (comma separated)', 'textarea', 'claude-opus-4-6, claude-haiku-4-5-20251001'],
           ['api_base', 'API base', 'text', 'https://api.anthropic.com'],
@@ -790,6 +885,7 @@ def html_page() -> str:
         subtitle: 'Probe OpenAI usage and rate limits via API key.',
         fields: [
           ['name', 'Account label', 'text', 'OpenAI API'],
+          ['email', 'Email / Gmail', 'email', ''],
           ['api_key', 'API key', 'password', ''],
           ['models', 'Models (comma separated)', 'textarea', 'gpt-4.1-mini, gpt-4.1'],
           ['api_base', 'API base', 'text', 'https://api.openai.com'],
@@ -802,6 +898,7 @@ def html_page() -> str:
         subtitle: 'Point the dashboard at a Claude Code keychain entry.',
         fields: [
           ['name', 'Connection label', 'text', 'Claude OAuth'],
+          ['email', 'Email / Gmail', 'email', ''],
           ['keychain_service', 'Keychain service', 'text', 'Claude Code-credentials'],
           ['keychain_account', 'Keychain account', 'text', ''],
           ['client_id', 'OAuth client ID', 'text', ''],
@@ -815,6 +912,7 @@ def html_page() -> str:
         subtitle: 'Point the dashboard at a Codex auth.json and sessions directory.',
         fields: [
           ['name', 'Connection label', 'text', 'Codex OAuth'],
+          ['email', 'Email / Gmail', 'email', ''],
           ['auth_file', 'auth.json path', 'text', '~/.codex/auth.json'],
           ['sessions_dir', 'sessions directory', 'text', '~/.codex/sessions'],
           ['client_id', 'OAuth client ID', 'text', 'app_EMoamEEZ73f0CkXaXp7hrann'],
@@ -934,7 +1032,10 @@ def html_page() -> str:
           <div class="card-row">
             <div class="card-identity">
               <div class="card-dot ${dotClass(account)}"></div>
-              <span class="card-name">${account.record.name}</span>
+              <div>
+                <span class="card-name">${account.record.name}</span>
+                ${account.record.email ? `<div style="font-size:0.7rem;color:var(--muted);margin-top:1px;">${account.record.email}</div>` : ''}
+              </div>
             </div>
             <span class="card-badge">${account.record.provider} ${account.record.auth_kind}</span>
           </div>
@@ -992,6 +1093,9 @@ def html_page() -> str:
         <div class="detail-head">
           <div class="eyebrow">${account.record.provider} / ${account.record.auth_kind}</div>
           <h2>${account.record.name}</h2>
+          ${account.record.email
+            ? `<div data-action="set-email" style="font-size:0.8rem;color:var(--muted);margin-top:-0.25rem;margin-bottom:0.25rem;cursor:pointer;" title="Click to edit email">${account.record.email}</div>`
+            : `<button class="btn btn-ghost btn-sm" data-action="set-email" style="font-size:0.7rem;padding:2px 8px;margin-top:-0.15rem;margin-bottom:0.25rem;">+ Add email</button>`}
           <div class="snapshot">${account.snapshot || 'Waiting for data'}</div>
           <div class="detail-chips">
             <span class="chip">Next: ${account.next_refresh_in}</span>
@@ -1007,7 +1111,7 @@ def html_page() -> str:
           </button>
           <button class="btn btn-ghost btn-sm" data-action="toggle-visible">${account.record.visible ? 'Hide' : 'Show'}</button>
           <button class="btn btn-ghost btn-sm" data-action="toggle-enabled">${account.record.enabled ? 'Disable' : 'Enable'}</button>
-          ${account.record.user_added ? '<button class="btn btn-danger btn-sm" data-action="delete">Delete</button>' : ''}
+          <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>
         </div>
 
         <div class="detail-windows">
@@ -1026,6 +1130,7 @@ def html_page() -> str:
         </div>
 
         <div class="kv">
+          ${kvItem('Email', account.record.email || '-')}
           ${kvItem('Last refreshed', formatDate(account.last_refresh_finished_at))}
           ${kvItem('Status', account.error || account.status_text)}
           ${kvItem('Default model', account.record.default_model || '-')}
@@ -1068,8 +1173,15 @@ def html_page() -> str:
           } else if (action === 'toggle-enabled') {
             await api(`/api/accounts/${account.id}`, { method: 'PATCH', body: { enabled: !account.record.enabled } });
             await loadSnapshot(true);
+          } else if (action === 'set-email') {
+            const email = window.prompt('Email / Gmail for this account:', account.record.email || '');
+            if (email === null) return;
+            await api(`/api/accounts/${account.id}`, { method: 'PATCH', body: { email: email.trim() } });
+            await loadSnapshot(true);
+            flash(email.trim() ? 'Email saved' : 'Email cleared', 2500, 'success');
           } else if (action === 'delete') {
-            if (!window.confirm(`Delete ${account.record.name}?`)) return;
+            const warn = account.record.user_added ? '' : '\\n(Discovered account — may reappear on next discovery)';
+            if (!window.confirm(`Delete ${account.record.name}?${warn}`)) return;
             await api(`/api/accounts/${account.id}`, { method: 'DELETE' });
             if (state.selectedId === account.id) state.selectedId = null;
             await loadSnapshot(true);
@@ -1149,13 +1261,27 @@ def html_page() -> str:
     }
 
     function renderForm() {
+      document.querySelectorAll('[data-mode]').forEach((btn) => {
+        const cls = btn.dataset.mode === state.mode ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+        btn.className = btn.dataset.mode === 'keychain-browse' ? cls + ' ' : cls;
+        if (btn.dataset.mode === 'keychain-browse') btn.style.borderColor = 'var(--accent)';
+      });
+      const grid = el('form-grid');
+      const footer = document.querySelector('.modal-footer');
+
+      if (state.mode === 'keychain-browse') {
+        el('modal-title').textContent = 'Browse Keychain';
+        el('modal-subtitle').textContent = 'Scanning macOS keychain for Claude & Codex OAuth entries...';
+        grid.innerHTML = '<div class="muted" style="padding:1rem;text-align:center;">Scanning...</div>';
+        if (footer) footer.style.display = 'none';
+        scanKeychain();
+        return;
+      }
+
+      if (footer) footer.style.display = '';
       const cfg = formModes[state.mode];
       el('modal-title').textContent = cfg.title;
       el('modal-subtitle').textContent = cfg.subtitle;
-      document.querySelectorAll('[data-mode]').forEach((btn) => {
-        btn.className = btn.dataset.mode === state.mode ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
-      });
-      const grid = el('form-grid');
       grid.innerHTML = '';
       cfg.fields.forEach(([name, label, type, placeholder]) => {
         const field = document.createElement('div');
@@ -1168,8 +1294,127 @@ def html_page() -> str:
       });
     }
 
+    async function scanKeychain() {
+      try {
+        const data = await api('/api/keychain/scan');
+        const grid = el('form-grid');
+        const entries = data.entries || [];
+        const clientId = data.client_id || '';
+        const cmd = data.command || '';
+        const oauthCount = entries.filter(e => e.has_oauth).length;
+        el('modal-subtitle').textContent = entries.length
+          ? `Found ${entries.length} keychain entry(s), ${oauthCount} with valid OAuth.`
+          : 'No Claude/Codex entries found in keychain.';
+        grid.innerHTML = '';
+
+        // Show the scan command
+        const cmdBlock = document.createElement('div');
+        cmdBlock.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem;margin-bottom:0.75rem;font-family:monospace;font-size:0.7rem;color:var(--muted);word-break:break-all;white-space:pre-wrap;line-height:1.5;';
+        cmdBlock.innerHTML = `<span style="color:var(--green);">$</span> ${escapeHtml(cmd)}`;
+        grid.appendChild(cmdBlock);
+
+        if (!entries.length) {
+          const empty = document.createElement('div');
+          empty.className = 'muted';
+          empty.style.cssText = 'padding:1.5rem;text-align:center;';
+          empty.textContent = 'No Claude or Codex OAuth entries found in keychain.';
+          grid.appendChild(empty);
+          return;
+        }
+
+        entries.forEach((entry, idx) => {
+          const card = document.createElement('div');
+          card.style.cssText = 'padding:0.75rem 1rem;border:1px solid var(--border);border-radius:8px;transition:border-color .15s;margin-bottom:0.75rem;';
+
+          const providerLabel = entry.provider === 'codex' ? 'Codex' : 'Claude';
+          const badge = entry.has_oauth
+            ? `<span style="color:var(--green);font-size:0.75rem;">Valid OAuth</span>`
+            : `<span style="color:var(--muted);font-size:0.75rem;">No OAuth data</span>`;
+          const sub = entry.subscription_type
+            ? `<span style="color:var(--accent);font-size:0.75rem;margin-left:0.5rem;">${entry.subscription_type}</span>`
+            : '';
+          const providerBadge = entry.has_oauth
+            ? `<span style="font-size:0.7rem;color:var(--muted);background:var(--bg);padding:1px 6px;border-radius:3px;margin-left:0.5rem;">${providerLabel}</span>`
+            : '';
+          const token = entry.token_preview
+            ? `<div style="font-size:0.7rem;color:var(--muted);font-family:monospace;margin-top:0.25rem;">${entry.token_preview}</div>`
+            : '';
+
+          // Per-entry security command
+          const entryCmd = entry.command || '';
+          const cmdLine = entryCmd
+            ? `<div style="font-family:monospace;font-size:0.65rem;color:var(--muted);margin-top:0.35rem;word-break:break-all;white-space:pre-wrap;background:var(--bg);padding:3px 6px;border-radius:4px;"><span style="color:var(--green);">$</span> ${escapeHtml(entryCmd)}</div>`
+            : '';
+
+          const nameId = `kc-name-${idx}`;
+          const emailId = `kc-email-${idx}`;
+          const defaultName = entry.service === 'Claude Code-credentials' ? 'Claude OAuth'
+            : entry.service.startsWith('Claude Code-credentials') ? 'Claude OAuth ' + entry.service.replace('Claude Code-credentials', '').replace('-','').trim()
+            : entry.service;
+
+          const inputRow = entry.has_oauth ? `
+            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;">
+              <input id="${nameId}" type="text" placeholder="Account label" value="${escapeHtml(defaultName)}"
+                style="flex:1 1 140px;min-width:120px;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);">
+              <input id="${emailId}" type="email" placeholder="Email / Gmail"
+                style="flex:1 1 160px;min-width:120px;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);">
+              <button class="btn btn-primary btn-sm kc-add" data-idx="${idx}" style="font-size:0.7rem;padding:4px 12px;white-space:nowrap;">Add</button>
+            </div>
+          ` : '';
+
+          card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;">
+              <div style="min-width:0;flex:1;">
+                <div style="font-weight:600;font-size:0.85rem;word-break:break-all;">${escapeHtml(entry.service)}</div>
+                <div style="font-size:0.75rem;color:var(--muted);">account: ${escapeHtml(entry.account)}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0;">${badge}${sub}${providerBadge}</div>
+            </div>
+            ${token}
+            ${cmdLine}
+            ${inputRow}
+          `;
+
+          if (!entry.has_oauth) {
+            card.style.opacity = '0.5';
+          }
+
+          grid.appendChild(card);
+        });
+
+        // Wire up the Add buttons
+        grid.querySelectorAll('.kc-add').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const idx = Number(btn.dataset.idx);
+            const entry = entries[idx];
+            const provider = entry.provider || 'claude';
+            const name = document.getElementById(`kc-name-${idx}`)?.value?.trim() || entry.service;
+            const email = document.getElementById(`kc-email-${idx}`)?.value?.trim() || '';
+            try {
+              const body = {
+                provider, auth_kind: 'oauth',
+                name, email: email || undefined,
+                keychain_service: entry.service,
+                keychain_account: entry.account,
+                client_id: clientId,
+              };
+              await api('/api/accounts', { method: 'POST', body });
+              closeModal();
+              await loadSnapshot(true);
+              flash(`Added ${name}`, 2500, 'success');
+            } catch (err) {
+              flash(err.message, 4000, 'error');
+            }
+          });
+        });
+      } catch (err) {
+        el('form-grid').innerHTML = '<div style="padding:1rem;color:var(--red);">Error scanning keychain: ' + escapeHtml(err.message) + '</div>';
+      }
+    }
+
     function collectFormPayload() {
       const cfg = formModes[state.mode];
+      if (!cfg) return {};
       const payload = { ...cfg.payload };
       cfg.fields.forEach(([name]) => {
         const node = el(`field-${name}`);
@@ -1246,6 +1491,12 @@ class UsageHubHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
 
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except BrokenPipeError:
+            pass
+
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -1272,6 +1523,18 @@ class UsageHubHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/state":
             self._send_json(self.server.app.snapshot())
+            return
+        if parsed.path == "/api/keychain/scan":
+            try:
+                client_id = discover_claude_client_id() or ""
+                entries = scan_keychain_entries()
+                self._send_json({
+                    "entries": entries,
+                    "client_id": client_id,
+                    "command": "security dump-keychain | grep -i 'claude\\|codex\\|anthropic\\|openai'\n# then per entry: security find-generic-password -s <service> -a <account> -w",
+                })
+            except Exception as exc:
+                self._error(500, compact_error(exc))
             return
         self._error(404, "Not found")
 

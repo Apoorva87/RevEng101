@@ -94,6 +94,7 @@ class AccountRecord:
     token_url: Optional[str] = None
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
+    email: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     source: str = "saved"
     user_added: bool = True

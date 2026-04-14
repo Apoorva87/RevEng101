@@ -12,9 +12,25 @@ Reverse engineering Claude Code and Codex/OpenAI authorization — OAuth flows, 
 - **Claude** — OAuth token flow analysis, binary reverse engineering, keychain credential extraction
 - **Codex** — Auth state discovery, refresh token recovery, ChatGPT usage API reverse engineering
 
+### [OAuthModelRouter](OAuthModelRouter/)
+
+Local reverse proxy for Claude and OpenAI-compatible tools that routes requests through multiple accounts on one machine.
+
+- token discovery from local auth material
+- request tracing and provider health checks
+- docs on Claude/OpenAI OAuth flows and local routing behavior
+
+### [ProxyServer](ProxyServer/)
+
+Local HTTP/HTTPS forward proxy with a real-time dashboard for reverse engineering and traffic analysis.
+
+- inspect paired requests and responses live
+- intercept and modify requests before they leave your machine
+- TLS certificate generation and HTTPS MITM docs under [`ProxyServer/docs/index.html`](ProxyServer/docs/index.html)
+
 ## Browse
 
-Open [`index.html`](index.html) in a browser or visit the [GitHub Pages site](https://apoorva87.github.io/RevEng101/) to navigate all project docs.
+Open [`index.html`](index.html) in a browser or visit the [GitHub Pages site](https://apoorva87.github.io/RevEng101/) to browse all project docs from one place.
 
 ## Setup
 
