@@ -18,6 +18,7 @@ from oauthrouter.server import (
     _probe_request_for_token,
     _probe_snippet,
     _rate_limit_snapshot_from_headers,
+    api_not_found,
     api_test_provider,
     token_rate_limits,
 )
@@ -147,6 +148,29 @@ def test_rate_limit_snapshot_parses_anthropic_windows():
     assert snapshot["5h_utilization"] == pytest.approx(0.25)
     assert snapshot["7d_utilization"] == pytest.approx(0.8)
     assert [window["label"] for window in snapshot["windows"]] == ["5h", "7d"]
+
+
+def test_rate_limit_snapshot_preserves_anthropic_overage_utilization():
+    snapshot = _rate_limit_snapshot_from_headers(
+        {
+            "anthropic-ratelimit-unified-status": "rejected",
+            "anthropic-ratelimit-unified-7d-utilization": "1.01",
+            "anthropic-ratelimit-unified-7d-status": "rejected",
+            "anthropic-ratelimit-unified-7d-reset": "2026-04-20T00:00:00Z",
+        }
+    )
+
+    assert snapshot is not None
+    assert snapshot["overall_status"] == "rejected"
+    assert snapshot["7d_utilization"] == pytest.approx(1.01)
+    assert snapshot["windows"] == [
+        {
+            "label": "7d",
+            "utilization": pytest.approx(1.01),
+            "status": "rejected",
+            "reset": "2026-04-20T00:00:00Z",
+        }
+    ]
 
 
 def test_rate_limit_snapshot_parses_generic_windows():
@@ -331,3 +355,12 @@ async def test_api_test_provider_allows_selected_unhealthy_token_and_recovers_it
     assert payload["ok"] is True
     assert refreshed is not None
     assert refreshed.status.value == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_unknown_api_path_returns_clean_404():
+    result = await api_not_found("discover")
+    payload = json.loads(result.body)
+
+    assert result.status_code == 404
+    assert payload["error"] == "API endpoint '/api/discover' not found"

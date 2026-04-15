@@ -20,7 +20,7 @@ to talk to one local endpoint while the router decides which account/token to us
 This repo currently works best with:
 
 - Claude: long-lived Claude tokens stored directly in the router DB
-- OpenAI/Codex: OAuth credentials discovered from `~/.codex/auth.json`
+- OpenAI/Codex: tokens stored directly in the router DB
 
 Important nuance:
 
@@ -183,8 +183,8 @@ Important:
 There are three practical ways to populate the DB:
 
 1. Use the web portal
-2. Use discovery/import
-3. Use the CLI manually
+2. Use the CLI manually
+3. Use the DB helper script directly
 
 ### Recommended Claude Setup
 
@@ -216,31 +216,34 @@ Expected behavior:
 
 ### Recommended OpenAI / Codex Setup
 
-Use the Codex OAuth credentials already present in:
+Use OpenAI/Codex credentials stored in the local DB.
+
+The only supported runtime source is:
 
 ```bash
-~/.codex/auth.json
+~/.oauthrouter/tokens.db
 ```
 
-The router needs:
+If you already have credentials in `~/.codex/auth.json`, extract the values you need and add them to the DB manually.
+
+The router typically needs:
 
 - `access_token`
 - `refresh_token`
 - `account_id` if available
 
-Best import paths:
+The router can also derive the ChatGPT account header from the JWT claims if `account_id` is missing, so the DB entry can stay minimal when you already have a valid JWT.
 
-- portal paste flow: paste `~/.codex/auth.json`
-- discovery/import flow from `~/.codex/auth.json`
-
-Discovery:
+CLI example:
 
 ```bash
-oauthrouter discover
-oauthrouter discover --import
+oauthrouter token add \
+  --name codex-plus \
+  --provider openai \
+  --access-token eyJ... \
+  --refresh-token rt_... \
+  --priority 1
 ```
-
-The router can also derive the ChatGPT account header from the JWT claims if `account_id` is missing, but importing the real auth JSON is still the cleanest path.
 
 ### Manual DB / Local Helpers
 
@@ -248,7 +251,6 @@ Repo helpers:
 
 - [scripts/dev/run.sh](scripts/dev/run.sh): restart the router
 - [scripts/ops/db_tokens.sh](scripts/ops/db_tokens.sh): inspect or edit token rows
-- [scripts/auth/setup.sh](scripts/auth/setup.sh): optional OAuth/bootstrap helper
 - [index.html](index.html): local docs portal for Markdown and HTML notes
 
 Example:
@@ -423,7 +425,7 @@ Things to do:
 
 - re-enable a token in the portal
 - explicitly select a token in `Test Provider`
-- re-import from `~/.codex/auth.json`
+- update or replace the corresponding DB token
 
 ### OpenAI Test Shows A Plan But Real OpenAI Requests Still Fail
 
@@ -459,7 +461,6 @@ Code layout:
 src/oauthrouter/
   cli.py
   config.py
-  discover.py
   models.py
   proxy.py
   server.py
@@ -473,7 +474,7 @@ src/oauthrouter/
 If you only need the practical path:
 
 1. Add long-lived Claude tokens to the router.
-2. Import Codex auth from `~/.codex/auth.json`.
+2. Add OpenAI/Codex tokens to `~/.oauthrouter/tokens.db`.
 3. Start the server with `./scripts/dev/run.sh`.
 4. Point Claude Code at `/claude` and Codex at `/openai`.
 5. Use the portal to test providers and inspect logs.

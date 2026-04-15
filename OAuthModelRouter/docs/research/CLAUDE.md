@@ -75,27 +75,19 @@ that provider, injects the auth credentials, and forwards the request. If upstre
 **Provider isolation**: Claude tokens are ONLY used for `/claude/*` routes. OpenAI tokens are
 ONLY used for `/openai/*` routes. Cross-provider routing is not possible.
 
-## Token Discovery
+## Token Sources
 
-The router can discover existing tokens on your machine:
+The router is DB-only now. Supported operational paths are:
 
 ```bash
-# Scan for tokens (shows what's available)
-oauthrouter discover
-
-# Scan and import active tokens
-oauthrouter discover --import
+oauthrouter token add ...
+oauthrouter token list
+oauthrouter token remove ...
+oauthrouter token refresh ...
+./scripts/ops/db_tokens.sh list
 ```
 
-**Where tokens are found:**
-
-| Provider | Location | Format |
-|----------|----------|--------|
-| OpenAI/Codex | `~/.codex/auth.json` | JSON with JWT access_token |
-| Claude | macOS Keychain: `Claude Code-credentials`, `Claude Code-credentials-2`, etc. | JSON with `claudeAiOauth` containing `accessToken`, `refreshToken`, `expiresAt` |
-
-**Note on discover --import:** Token names in the DB use the keychain service name
-lowercased (e.g. `claude code-credentials`). The import matches on this name for updates.
+All runtime token state lives in `~/.oauthrouter/tokens.db`.
 
 ## Token Management (CLI)
 
@@ -138,8 +130,7 @@ src/oauthrouter/
   token_manager.py  # LRU selection, refresh, failover logic
   proxy.py          # HTTP forwarding with auth injection + streaming
   server.py         # FastAPI routes (portal, API, proxy catch-all)
-  cli.py            # Typer CLI (serve, token, discover, status)
-  discover.py       # Token discovery (Keychain, ~/.codex/auth.json)
+  cli.py            # Typer CLI (serve, token, status)
   static/portal.html # Web management portal
 ```
 
@@ -200,10 +191,3 @@ Claude Code is single-account-per-machine by design. Two keychain entries
 isolation, but they share the same macOS user. The OAuth refresh endpoint rate-limits
 by IP (not account), so failed refresh attempts for one account lock out all accounts
 on that machine. This was the primary motivation for switching to long-lived API keys.
-
-### discover --import name mismatch bug (2026-04-12, fixed)
-
-The discover `--import` command was converting token names with `.replace(" ", "-")`,
-producing `claude-code-credentials`, but the DB stored them as `claude code-credentials`
-(with spaces). Updates never matched existing rows. Fixed by removing the dash
-replacement in `cli.py`.

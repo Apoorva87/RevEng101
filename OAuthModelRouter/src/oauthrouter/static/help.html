@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OAuthModelRouter Help</title>
+<style>
+  :root {
+    --bg: #08111f;
+    --bg2: #0d1728;
+    --surface: rgba(13, 21, 37, 0.9);
+    --surface2: rgba(24, 35, 57, 0.92);
+    --surface3: #1b2740;
+    --border: rgba(133, 162, 214, 0.18);
+    --text: #edf3ff;
+    --text2: #9aa9c3;
+    --muted: #6e7f9d;
+    --accent: #69a4ff;
+    --green: #39d49a;
+    --orange: #f5be61;
+    --red: #f27d7d;
+    --shadow: 0 24px 80px rgba(3, 8, 17, 0.45);
+    --font: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(105, 164, 255, 0.12), transparent 26%),
+      radial-gradient(circle at top right, rgba(57, 212, 154, 0.08), transparent 24%),
+      linear-gradient(180deg, var(--bg2) 0%, var(--bg) 58%, #06101d 100%);
+  }
+
+  .shell {
+    max-width: 1260px;
+    margin: 0 auto;
+    padding: 28px 28px 44px;
+  }
+
+  .hero {
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 22px 24px;
+    background: linear-gradient(180deg, rgba(14, 22, 37, 0.94), rgba(10, 17, 29, 0.92));
+    box-shadow: var(--shadow);
+    margin-bottom: 18px;
+  }
+
+  .eyebrow {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 11px;
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-size: 28px;
+    line-height: 1.1;
+    margin-bottom: 10px;
+    letter-spacing: -0.04em;
+  }
+
+  .lede {
+    color: var(--text2);
+    max-width: 880px;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(20, 30, 49, 0.85);
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(180deg, #76adff, #558bff);
+    border-color: #6ea8ff;
+    color: #fff;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 18px;
+  }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(14, 22, 37, 0.94), rgba(10, 17, 29, 0.92));
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .card-head {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card-head h2 {
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+
+  .card-head p {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.5;
+  }
+
+  .card-body {
+    padding: 18px;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .step {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(17, 28, 47, 0.72);
+    padding: 14px 15px;
+  }
+
+  .step h3 {
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+
+  .step p,
+  .step li {
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+
+  .step ul {
+    margin-left: 18px;
+  }
+
+  .mono {
+    font-family: var(--font);
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  .section {
+    margin-top: 18px;
+  }
+
+  .section h2 {
+    font-size: 18px;
+    margin-bottom: 10px;
+    letter-spacing: -0.03em;
+  }
+
+  .section p {
+    color: var(--text2);
+    line-height: 1.7;
+    font-size: 14px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    text-align: left;
+  }
+
+  th {
+    color: var(--text2);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--surface2);
+  }
+
+  td code {
+    font-family: var(--font);
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font);
+  }
+
+  .tag-live {
+    color: var(--green);
+    background: rgba(57, 212, 154, 0.14);
+  }
+
+  .note {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(245, 190, 97, 0.24);
+    background: rgba(245, 190, 97, 0.08);
+    color: var(--text2);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .path-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .path-item {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(17, 28, 47, 0.72);
+  }
+
+  .path-item strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+
+  .path-item p {
+    font-size: 13px;
+  }
+
+  .snippet-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .snippet {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(7, 14, 24, 0.9);
+    overflow-x: auto;
+  }
+
+  .snippet code {
+    display: block;
+    white-space: pre;
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--accent);
+  }
+
+  .snippet-note {
+    margin-top: 10px;
+    color: var(--text2);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  @media (max-width: 980px) {
+    .grid { grid-template-columns: 1fr; }
+    .snippet-grid { grid-template-columns: 1fr; }
+    .shell { padding: 18px 16px 30px; }
+    h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <div class="eyebrow">Built-In Help</div>
+      <h1>Dashboard walkthrough and endpoint map</h1>
+      <p class="lede">
+        This page explains how the current DB-backed dashboard works, how the browser code in
+        <span class="mono">src/oauthrouter/static/portal.html</span> talks to the FastAPI server in
+        <span class="mono">src/oauthrouter/server.py</span>, and what every HTTP endpoint is responsible for.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/portal">Open Dashboard</a>
+        <a class="btn" href="/health">View Health JSON</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-head">
+          <h2>How the dashboard boots</h2>
+          <p>The home screen is intentionally thin: it fetches DB state, renders views, and posts mutations back to the API.</p>
+        </div>
+        <div class="card-body stack">
+          <div class="step">
+            <h3>1. Initial load</h3>
+            <p>
+              <span class="mono">DOMContentLoaded → loadTokens()</span> is the entrypoint. That function requests
+              <span class="mono">/api/tokens</span>, <span class="mono">/health</span>, and
+              <span class="mono">/api/providers</span> in parallel.
+            </p>
+          </div>
+          <div class="step">
+            <h3>2. Render pass</h3>
+            <p>
+              The response fan-out is:
+            </p>
+            <ul>
+              <li><span class="mono">renderStats()</span> for the top summary cards</li>
+              <li><span class="mono">renderTokens()</span> for the token table</li>
+              <li><span class="mono">renderProviders()</span> for provider controls and test state</li>
+              <li><span class="mono">setEndpointPorts()</span> to rewrite the copyable command snippets</li>
+            </ul>
+          </div>
+          <div class="step">
+            <h3>3. State kept in the browser</h3>
+            <p>
+              The dashboard keeps only lightweight UI state in memory:
+            </p>
+            <ul>
+              <li><span class="mono">providerCache</span> for the last provider payload</li>
+              <li><span class="mono">providerTestState</span> for the latest provider test result card</li>
+              <li><span class="mono">providerSelections</span> for the currently selected token per provider</li>
+              <li><span class="mono">editingProviderName</span> and token edit modal state</li>
+            </ul>
+          </div>
+          <div class="step">
+            <h3>4. Token actions</h3>
+            <p>
+              Table actions call simple mutation endpoints:
+            </p>
+            <ul>
+              <li><span class="mono">addManualToken()</span> → <span class="mono">POST /api/tokens</span></li>
+              <li><span class="mono">updateTokenPriority()</span> → <span class="mono">PATCH /api/tokens/{id}</span></li>
+              <li><span class="mono">toggleToken()</span> → <span class="mono">POST /api/tokens/{id}/enable|disable</span></li>
+              <li><span class="mono">refreshToken()</span> → <span class="mono">POST /api/tokens/{id}/refresh</span></li>
+              <li><span class="mono">deleteToken()</span> → <span class="mono">DELETE /api/tokens/{id}</span></li>
+              <li><span class="mono">openEditModal()/saveEditToken()</span> → <span class="mono">GET /api/tokens</span> then <span class="mono">PATCH /api/tokens/{id}</span></li>
+            </ul>
+          </div>
+          <div class="step">
+            <h3>5. Provider actions</h3>
+            <p>
+              Provider cards are driven by <span class="mono">/api/providers</span>. The modal writes provider defaults back with
+              <span class="mono">PATCH /api/providers/{provider_name}</span>, and the live test button calls
+              <span class="mono">POST /api/providers/{provider_name}/test</span>.
+            </p>
+          </div>
+          <div class="step">
+            <h3>6. Logs tab</h3>
+            <p>
+              The logs page reads from the in-memory proxy trace buffer:
+            </p>
+            <ul>
+              <li><span class="mono">loadLogs()</span> → <span class="mono">GET /api/logs</span></li>
+              <li><span class="mono">loadLogDetail(id)</span> → <span class="mono">GET /api/logs/{id}</span></li>
+              <li>The auto-refresh loop polls every 3 seconds while the Logs tab is active</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Key files</h2>
+          <p>The dashboard is spread across one HTML file plus server and routing helpers.</p>
+        </div>
+        <div class="card-body path-list">
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/static/portal.html</span></strong>
+            <p>Markup, CSS, and the full dashboard client-side controller.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/server.py</span></strong>
+            <p>Page routes, JSON APIs, health route, request log APIs, and the catch-all proxy route.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/token_store.py</span></strong>
+            <p>Async SQLite access layer for <span class="mono">~/.oauthrouter/tokens.db</span>.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/token_manager.py</span></strong>
+            <p>Token picking, cooldown tracking, auth failure recovery, and refresh behavior.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/proxy.py</span></strong>
+            <p>Auth injection, upstream forwarding, trace capture, and proxy response handling.</p>
+          </div>
+          <div class="note">
+            The dashboard is DB-backed only. Tokens are managed directly in <span class="mono">~/.oauthrouter/tokens.db</span> via the portal, the CLI, or the helper scripts.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>HTTP endpoint map</h2>
+      <div class="card">
+        <div class="card-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>Path</th>
+                <th>State</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>GET</code></td><td><code>/portal</code></td><td><span class="tag tag-live">live</span></td><td>Serves the main dashboard UI.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/help</code></td><td><span class="tag tag-live">live</span></td><td>Serves this built-in walkthrough page.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/tokens</code></td><td><span class="tag tag-live">live</span></td><td>Lists all DB tokens with masked values, expiry info, and any cached rate-limit snapshot.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/tokens</code></td><td><span class="tag tag-live">live</span></td><td>Adds a token row to the local SQLite store.</td></tr>
+              <tr><td><code>PATCH</code></td><td><code>/api/tokens/{token_id}</code></td><td><span class="tag tag-live">live</span></td><td>Updates priority, status, auth material, account metadata, or token name.</td></tr>
+              <tr><td><code>DELETE</code></td><td><code>/api/tokens/{token_id}</code></td><td><span class="tag tag-live">live</span></td><td>Deletes a token from the DB.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/tokens/{token_id}/enable</code></td><td><span class="tag tag-live">live</span></td><td>Marks a token healthy so it can re-enter selection.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/tokens/{token_id}/disable</code></td><td><span class="tag tag-live">live</span></td><td>Marks a token unhealthy so it is skipped by selection.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/tokens/{token_id}/refresh</code></td><td><span class="tag tag-live">live</span></td><td>For tokens with refresh material, attempts an OAuth refresh through the configured token endpoint.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/tokens/{token_id}/test</code></td><td><span class="tag tag-live">live</span></td><td>Sends a probe request using a specific token instead of auto-selection.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/providers</code></td><td><span class="tag tag-live">live</span></td><td>Returns provider defaults plus token coverage and cooldown state for each provider.</td></tr>
+              <tr><td><code>PATCH</code></td><td><code>/api/providers/{provider_name}</code></td><td><span class="tag tag-live">live</span></td><td>Edits provider config such as upstream URL, auth header, token endpoint, or extra headers.</td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/providers/{provider_name}/test</code></td><td><span class="tag tag-live">live</span></td><td>Runs a live provider probe, with failover/cooldown behavior when appropriate.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/health</code></td><td><span class="tag tag-live">live</span></td><td>Returns high-level health based on healthy token counts per provider.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/logs</code></td><td><span class="tag tag-live">live</span></td><td>Returns recent proxy request summaries from the in-memory ring buffer.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/logs/{log_id}</code></td><td><span class="tag tag-live">live</span></td><td>Returns the detailed trace for a single proxied request.</td></tr>
+              <tr><td><code>ANY</code></td><td><code>/{provider}/{path:path}</code></td><td><span class="tag tag-live">live</span></td><td>Catch-all proxy route for forwarded OpenAI/Claude traffic. This must stay last in the router registration order.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Request flow on the server</h2>
+      <div class="card">
+        <div class="card-body stack">
+          <div class="step">
+            <h3>Page routes</h3>
+            <p>
+              <span class="mono">/portal</span> and <span class="mono">/help</span> simply return static HTML files from
+              <span class="mono">src/oauthrouter/static/</span>.
+            </p>
+          </div>
+          <div class="step">
+            <h3>DB-backed dashboard APIs</h3>
+            <p>
+              Most portal endpoints are thin wrappers around <span class="mono">TokenStore</span> and configuration state.
+              They validate JSON, read or mutate the SQLite DB, and return JSON shaped specifically for the browser renderer.
+            </p>
+          </div>
+          <div class="step">
+            <h3>Provider tests</h3>
+            <p>
+              Provider probes are richer than plain CRUD. They can auto-pick tokens through <span class="mono">TokenManager</span>,
+              respect cooldowns, retry on alternate tokens after <span class="mono">429</span>, attempt auth recovery on
+              <span class="mono">401/403</span>, and update rate-limit snapshots for dashboard display.
+            </p>
+          </div>
+          <div class="step">
+            <h3>Catch-all proxy</h3>
+            <p>
+              The final route is the real proxy entrypoint. It forwards requests through <span class="mono">forward_request()</span>,
+              records trace attempts, stores summary rows in the in-memory log buffer, and keeps detailed traces under
+              <span class="mono">request_details</span>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Routing Policy In Code</h2>
+      <div class="snippet-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>1. The URL prefix picks the provider lane</h2>
+            <p>Provider routing is fixed by the incoming path. The router does not switch providers based on the request body model.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>@app.api_route(
+    "/{provider}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+async def proxy_route(provider: str, path: str, request: Request) -> Response:
+    response = await forward_request(
+        request=request,
+        provider=provider,
+        path=path,
+        ...
+    )</code></pre>
+            <p class="snippet-note">
+              Policy: <span class="mono">/claude/*</span> stays on Claude tokens and <span class="mono">/openai/*</span>
+              stays on OpenAI tokens. There is no cross-provider failover and no model-driven provider switching.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>2. The request body is forwarded unchanged</h2>
+            <p>The router injects auth and forwards the original payload. It does not rewrite the model field.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>upstream_url = _build_upstream_url(
+    provider_config, path, request.url.query or ""
+)
+headers = _prepare_forwarded_headers(request)
+headers = _inject_auth(headers, token, provider_config)
+body = await request.body()
+
+response = await _do_request(
+    http_client=http_client,
+    method=request.method,
+    url=upstream_url,
+    headers=headers,
+    body=body,
+    request_id=request_id,
+)</code></pre>
+            <p class="snippet-note">
+              Policy: the client’s requested model goes upstream exactly as sent. The router does token/account routing only;
+              it does not do model fallback or model substitution.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>3. Token order is priority-first, healthy-only</h2>
+            <p>Selection is scoped to one provider and starts from DB priority order.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>SELECT * FROM tokens
+WHERE provider = ? AND status = 'healthy'
+ORDER BY priority ASC, created_at ASC, id ASC
+
+for candidate in healthy:
+    if candidate.id in excluded:
+        continue
+    cooldown_until = self.get_rate_limit_cooldown(candidate.id)
+    if cooldown_until is not None:
+        continue
+    candidates.append(candidate)</code></pre>
+            <p class="snippet-note">
+              Policy: only healthy tokens are considered. Lower numeric priority wins. Tokens in in-memory cooldown are skipped.
+              <span class="mono">last_used_at</span> is operational metadata only and is not part of routing order anymore.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>4. Quota depletion means same-provider token failover</h2>
+            <p>An upstream <span class="mono">429</span> is treated as token/account exhaustion, not as a model rewrite signal.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>if response.status_code == 429:
+    cooldown_until = _cooldown_until_from_headers(response.headers)
+    token_manager.mark_token_rate_limited(token.id, retry_at=cooldown_until)
+
+    token = await token_manager.pick_token(
+        provider,
+        exclude_token_ids={token.id},
+    )
+    response = await _do_request(...)</code></pre>
+            <p class="snippet-note">
+              Policy: the router cools down the current token and retries the exact same request on the next token for the
+              same provider. If no usable token remains, the request ends as <span class="mono">429</span>. It does not switch
+              models and it does not switch providers.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>5. Auth failures try refresh before giving up</h2>
+            <p><span class="mono">401/403</span> are treated differently from quota errors.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>if response.status_code in (401, 403):
+    next_token = await token_manager.handle_auth_failure(token, provider)
+
+async def handle_auth_failure(self, token: Token, provider: str) -> Optional[Token]:
+    refreshed = await self.refresh_token(token)
+    if refreshed:
+        return refreshed
+    await self._store.mark_unhealthy(token.id)
+    return await self.pick_token(provider, exclude_token_ids={token.id})</code></pre>
+            <p class="snippet-note">
+              Policy: auth failures attempt token refresh first. If refresh fails, the token is marked unhealthy and the
+              router moves to the next token for the same provider.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>6. When every token is blocked, the router stops locally</h2>
+            <p>The router can return an immediate local error before any upstream call if every healthy token is cooling down.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>if not candidates:
+    raise NoUsableTokensError(
+        provider=provider,
+        total_tokens=total_tokens,
+        healthy_tokens=len(healthy),
+        cooling_tokens=cooling_tokens,
+        excluded_tokens=excluded_tokens,
+        next_retry_at=next_retry_at,
+    )</code></pre>
+            <p class="snippet-note">
+              Policy: if the provider still has healthy tokens in the DB but all of them are cooling down, the router returns
+              a local <span class="mono">429</span> with the next retry time instead of sending another doomed request upstream.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Other Important Snippets</h2>
+      <div class="snippet-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Provider tests are health probes, not exact live-model tests</h2>
+            <p>The dashboard test buttons use fixed probe models or the OpenAI usage endpoint.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>PROBE_MODELS = {
+    "claude": "claude-haiku-4-5-20251001",
+    "openai": "gpt-4o-mini",
+}
+
+return (
+    "POST",
+    f"{provider_cfg.upstream.rstrip('/')}/v1/messages",
+    headers,
+    {
+        "model": PROBE_MODELS["claude"],
+        "max_tokens": 24,
+        "messages": [{"role": "user", "content": "Reply with OK only."}],
+    },
+)</code></pre>
+            <p class="snippet-note">
+              Policy: a passing provider test means the token/provider path is alive and rate-limit data can be collected.
+              It does not prove that your exact live model still has quota.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>The dashboard boot path is a thin data fan-out</h2>
+            <p>The browser fetches state in parallel and then renders everything from those three payloads.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>const [tokens, health, providers] = await Promise.all([
+  api('/api/tokens'),
+  api('/health'),
+  api('/api/providers'),
+]);
+
+renderTokens(tokens);
+renderStats(tokens, health);
+renderProviders(providers);
+setEndpointPorts();</code></pre>
+            <p class="snippet-note">
+              Policy: the home screen is intentionally thin. Most behavior lives on the server; the browser mostly renders
+              DB state and posts small mutations back to the API.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Rate-limit numbers are normalized for the UI</h2>
+            <p>The server translates mixed provider formats into one shared snapshot shape for the portal.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>def _parse_fractional_value(value: str, *, allow_overage: bool = False) -> Optional[float]:
+    if numeric &lt;= 1:
+        return numeric
+    if allow_overage and numeric &lt; 10:
+        return numeric
+    if numeric &lt;= 100:
+        numeric /= 100.0
+        return numeric
+
+window["utilization"] = util
+snapshot[f"{label}_reset"] = reset_iso</code></pre>
+            <p class="snippet-note">
+              Policy: the dashboard always receives utilization in a normalized fraction form plus explicit reset timestamps.
+              Anthropic overages like <span class="mono">1.01</span> are preserved as <span class="mono">101%</span>, not
+              misread as <span class="mono">1%</span>.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Unknown API paths are kept out of the proxy lane</h2>
+            <p>A small guard route prevents old or mistyped API URLs from being interpreted as provider names.</p>
+          </div>
+          <div class="card-body">
+            <pre class="snippet"><code>@app.api_route("/api/{path:path}", methods=[...])
+async def api_not_found(path: str) -> JSONResponse:
+    normalized = f"/api/{path}".rstrip("/") if path else "/api"
+    return JSONResponse(
+        {"error": f"API endpoint '{normalized}' not found"},
+        status_code=404,
+    )</code></pre>
+            <p class="snippet-note">
+              Policy: bad API paths fail cleanly as API errors instead of falling through the provider proxy route as
+              <span class="mono">Unknown provider: api</span>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

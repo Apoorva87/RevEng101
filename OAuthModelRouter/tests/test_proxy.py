@@ -159,6 +159,31 @@ def test_health_endpoint():
     )
 
 
+def test_help_route_exists():
+    """The built-in help page is exposed as /help."""
+    from oauthrouter.server import app
+
+    assert any(
+        route.path == "/help"
+        for route in app.routes
+        if hasattr(route, "path")
+    )
+
+
+def test_discovery_routes_removed():
+    """Legacy discovery/import routes are no longer registered."""
+    from oauthrouter.server import app
+
+    paths = {
+        route.path for route in app.routes if hasattr(route, "path")
+    }
+    assert "/api/discover" not in paths
+    assert "/api/discover/import" not in paths
+    assert "/api/tokens/import-codex-json" not in paths
+    assert "/api/discover/keychain" not in paths
+    assert "/api/tokens/import-keychain" not in paths
+
+
 def test_proxy_route_exists():
     """The catch-all proxy route is registered."""
     from oauthrouter.server import app

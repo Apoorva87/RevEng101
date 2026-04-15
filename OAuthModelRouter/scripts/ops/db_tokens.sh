@@ -225,9 +225,10 @@ healthcheck_claude() {
     print_field "Result" "HEALTHY (auth ok, usage allowed)"
     sqlite3 "$DB" "UPDATE tokens SET status='healthy' WHERE id='$id';"
   elif [[ "$http_code" == "429" && -n "$unified_status" ]]; then
-    # 429 with rate-limit headers = auth is good, just rate limited
-    print_field "Result" "RATE LIMITED (auth ok, usage exhausted)"
-    sqlite3 "$DB" "UPDATE tokens SET status='rate_limited' WHERE id='$id';"
+    # 429 with rate-limit headers = auth is good. Keep the DB token enabled;
+    # the router handles cooldowns in memory instead of persisting a third state.
+    print_field "Result" "RATE LIMITED (auth ok, token kept healthy in DB)"
+    sqlite3 "$DB" "UPDATE tokens SET status='healthy' WHERE id='$id';"
   else
     # 401/403/other = auth is broken
     body=$(printf '%s' "$full_response" | sed '1,/^\r$/d')
@@ -240,8 +241,8 @@ try:
 except: print(sys.stdin.read()[:200])
 " 2>/dev/null || echo "${body:0:200}")
     print_field "Error" "$err"
-    print_field "Result" "AUTH FAILED"
-    sqlite3 "$DB" "UPDATE tokens SET status='error' WHERE id='$id';"
+    print_field "Result" "AUTH FAILED (marked unhealthy)"
+    sqlite3 "$DB" "UPDATE tokens SET status='unhealthy' WHERE id='$id';"
     return 0
   fi
 
@@ -363,8 +364,8 @@ except Exception as e:
     sqlite3 "$DB" "UPDATE tokens SET status='healthy' WHERE id='$id';"
   else
     print_field "Error" "${parse_payload:-Could not parse response}"
-    print_field "Result" "FAILED"
-    sqlite3 "$DB" "UPDATE tokens SET status='error' WHERE id='$id';"
+    print_field "Result" "FAILED (marked unhealthy)"
+    sqlite3 "$DB" "UPDATE tokens SET status='unhealthy' WHERE id='$id';"
   fi
 }
 

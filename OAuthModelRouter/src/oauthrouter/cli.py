@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
-from datetime import datetime
 from typing import Optional
 
 import typer
@@ -305,86 +303,6 @@ def status(
             await store.close()
 
     _run_async(_status())
-
-
-@app.command()
-def discover(
-    import_tokens: bool = typer.Option(
-        False, "--import", "-i",
-        help="Import discovered tokens into the router's token store",
-    ),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
-) -> None:
-    """Discover existing OAuth tokens on this machine.
-
-    Searches ~/.codex/auth.json (OpenAI/Codex) and macOS Keychain (Claude Code).
-    Use --import to automatically add discovered tokens to the router.
-    """
-    _configure_logging(verbose)
-
-    from oauthrouter.discover import (
-        discover_all_tokens,
-        discovered_token_to_token,
-        print_discovery_report,
-    )
-
-    discovered = discover_all_tokens()
-    print_discovery_report(discovered)
-
-    if not import_tokens:
-        if discovered:
-            typer.echo(
-                "Tip: Run with --import to add these tokens to the router.\n"
-            )
-        return
-
-    # Import discovered tokens into the store
-    active = [t for t in discovered if not t.is_expired and not t.error and t.access_token]
-    if not active:
-        typer.echo("No active tokens to import.")
-        return
-
-    async def _import():
-        store = _get_store()
-        await store.init_db()
-        try:
-            imported = 0
-            for dt in active:
-                # Generate a friendly name from source
-                if "codex" in dt.source:
-                    name = f"codex-{dt.subscription_type or 'default'}"
-                else:
-                    service = dt.source.split(":", 1)[1] if ":" in dt.source else dt.source
-                    name = service.lower()
-
-                # Check if already exists
-                existing = await store.get_token(name)
-                if existing:
-                    typer.echo(f"  Updating existing token '{name}'...")
-                    await store.update_token(
-                        name,
-                        access_token=dt.access_token,
-                        refresh_token=dt.refresh_token,
-                        expires_at=dt.expires_at,
-                        status=TokenStatus.HEALTHY,
-                        priority=100,
-                    )
-                else:
-                    token = discovered_token_to_token(
-                        dt,
-                        token_id=name,
-                        priority=100,
-                    )
-                    await store.add_token(token)
-                    typer.echo(f"  Imported '{name}' ({dt.provider})")
-
-                imported += 1
-
-            typer.echo(f"\n{imported} token(s) imported successfully.")
-        finally:
-            await store.close()
-
-    _run_async(_import())
 
 
 if __name__ == "__main__":

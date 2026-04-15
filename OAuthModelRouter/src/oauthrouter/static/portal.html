@@ -64,7 +64,7 @@
     flex-direction: column;
   }
   .header-actions { display: flex; gap: 10px; }
-  .container { max-width: 1360px; margin: 0 auto; padding: 28px 32px 40px; }
+  .container { max-width: 1520px; margin: 0 auto; padding: 28px 32px 40px; }
 
   .hero {
     display: flex;
@@ -340,19 +340,23 @@
     background: rgba(105,164,255,0.08);
   }
   .provider-test-title {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text2);
     margin-bottom: 6px;
   }
   .provider-test-summary {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text);
-    line-height: 1.55;
+    line-height: 1.5;
   }
   .provider-test-meta {
     margin-top: 8px;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text2);
+    line-height: 1.5;
+  }
+  .provider-test-line + .provider-test-line {
+    margin-top: 4px;
   }
 
   /* Token table */
@@ -702,6 +706,7 @@
   .status-5xx { color: var(--red); }
 
   /* Rate limit bars */
+  .rl-cell { min-width: 120px; }
   .rl-bars { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
   .rl-row { display: flex; align-items: center; gap: 6px; }
   .rl-label { font-size: 10px; font-family: var(--font); color: var(--text2); width: 22px; text-align: right; }
@@ -712,7 +717,24 @@
   .rl-fill {
     height: 100%; border-radius: 3px; transition: width 0.3s;
   }
-  .rl-pct { font-size: 10px; font-family: var(--font); width: 32px; }
+  .rl-pct {
+    font-size: 10px;
+    font-family: var(--font);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 40px;
+    text-align: right;
+  }
+  .rl-reset-cell {
+    min-width: 140px;
+    font-size: 9px;
+    line-height: 1.3;
+    color: var(--text2);
+    font-family: var(--font);
+    white-space: nowrap;
+  }
+  .rl-reset-line + .rl-reset-line {
+    margin-top: 2px;
+  }
 
   /* Diff-style highlighting */
   .diff-pre { padding: 0; }
@@ -780,7 +802,8 @@
     <div class="header-subtitle">Professional local control plane for provider routing, token health, and request inspection.</div>
   </div>
   <div class="header-actions">
-    <button class="btn" onclick="refreshAll()">Refresh</button>
+    <a class="btn" href="/help">Help</a>
+    <button class="btn" id="refresh-all-btn" onclick="refreshAll()">Refresh</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ Add Token</button>
   </div>
 </div>
@@ -795,7 +818,7 @@
   <div class="hero">
     <div class="hero-copy">
       <h2>Provider routing and token operations</h2>
-      <p>Test providers, tune defaults, and manage token health from one local dashboard.</p>
+      <p>Manage the tokens stored in <code>~/.oauthrouter/tokens.db</code>, test providers, and inspect live routing behavior.</p>
       <div class="hero-commands">
         <div class="hero-cmd">
           <span class="hero-cmd-label">Claude</span>
@@ -811,7 +834,6 @@
     </div>
     <div class="hero-actions">
       <button class="btn btn-primary" onclick="openAddModal()">Add Token</button>
-      <button class="btn" onclick="runDiscovery()">Scan Machine</button>
       <button class="btn" onclick="loadTokens()">Reload Dashboard</button>
     </div>
   </div>
@@ -845,7 +867,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Managed Tokens</h2>
-        <p>Adjust token priority, enable or disable a token, and refresh credentials on demand.</p>
+        <p>Adjust token priority, enable or disable a token, and refresh credentials on demand from the local token database.</p>
       </div>
       <button class="btn btn-sm" onclick="loadTokens()">Reload</button>
     </div>
@@ -864,17 +886,6 @@
     </div>
     <div class="section-body" id="providers-body">
       <div class="empty-state">Loading providers...</div>
-    </div>
-  </div>
-
-  <!-- Discovery -->
-  <div class="section">
-    <div class="section-header">
-      <h2>Token Discovery</h2>
-      <button class="btn btn-sm btn-primary" onclick="runDiscovery()">Scan Machine</button>
-    </div>
-    <div class="section-body" id="discovery-body">
-      <div class="empty-state">Click "Scan Machine" to discover OAuth tokens on this computer.</div>
     </div>
   </div>
 </div>
@@ -956,13 +967,11 @@
       <h3>Add Token</h3>
       <button class="modal-close" onclick="closeAddModal()">&times;</button>
     </div>
-    <div class="tabs" id="add-tabs">
-      <div class="tab active" onclick="switchAddTab('manual')">Manual</div>
-      <div class="tab" onclick="switchAddTab('codex')">Paste Codex auth.json</div>
-      <div class="tab" onclick="switchAddTab('keychain')">Import from Keychain</div>
+    <div class="modal-body" style="padding-bottom:0">
+      <div class="mono" style="font-size:11px;color:var(--text2)">
+        Tokens are managed directly in <code>~/.oauthrouter/tokens.db</code>. Enter the credential material you want the router to use.
+      </div>
     </div>
-
-    <!-- Manual tab -->
     <div class="tab-content active" id="tab-manual">
       <div class="modal-body">
         <div class="form-group">
@@ -993,38 +1002,6 @@
       <div class="modal-footer">
         <button class="btn" onclick="closeAddModal()">Cancel</button>
         <button class="btn btn-primary" onclick="addManualToken()">Add Token</button>
-      </div>
-    </div>
-
-    <!-- Codex paste tab -->
-    <div class="tab-content" id="tab-codex">
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Token Name</label>
-          <input type="text" id="c-name" placeholder="e.g. codex-plus-2">
-        </div>
-        <div class="form-group">
-          <label>Paste contents of ~/.codex/auth.json</label>
-          <textarea id="c-json" placeholder='{"auth_mode":"chatgpt","tokens":{"access_token":"..."}}'></textarea>
-        </div>
-        <div class="form-group">
-          <label>Priority</label>
-          <input type="number" id="c-priority" value="100" step="1">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeAddModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="importCodexJson()">Import</button>
-      </div>
-    </div>
-
-    <!-- Keychain tab -->
-    <div class="tab-content" id="tab-keychain">
-      <div class="modal-body" id="keychain-body">
-        <div class="empty-state">Loading keychain entries...</div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeAddModal()">Cancel</button>
       </div>
     </div>
   </div>
@@ -1123,6 +1100,7 @@ let providerCache = [];
 let providerTestState = {};
 let providerSelections = {};
 let editingProviderName = null;
+let refreshAllPending = false;
 
 function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
@@ -1132,9 +1110,13 @@ function toast(msg, type = 'success') {
 }
 
 async function api(path, opts = {}) {
+  const {
+    suppressErrorToast = false,
+    ...fetchOpts
+  } = opts;
   const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
-    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(fetchOpts.headers || {}) },
+    ...fetchOpts,
   });
   const raw = await res.text();
   let data = {};
@@ -1145,7 +1127,7 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) {
     const message = data.error || `Request failed (${res.status})`;
-    toast(message, 'error');
+    if (!suppressErrorToast) toast(message, 'error');
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
@@ -1307,27 +1289,61 @@ function providerTestVisualState(state) {
 
 function providerTestSummary(state) {
   if (!state) return 'No test has been run yet. Use the button above to verify live upstream routing.';
+  if (state.batch && state.pending) {
+    return `Running live checks for ${state.tested_tokens || 0} token connection${state.tested_tokens === 1 ? '' : 's'}...`;
+  }
+  if (state.batch) {
+    const tested = state.tested_tokens || 0;
+    if (!tested) return 'No token connections were tested for this provider.';
+    return `Batch refresh tested ${tested} token connection${tested === 1 ? '' : 's'}: ${state.ok_tokens || 0} healthy, ${state.failed_tokens || 0} failed.`;
+  }
   if (state.pending) return 'Running a live provider check with the current selected token...';
-  if (state.ok) return `Healthy response from upstream (${state.status_code}) using token ${state.token_id}.`;
-  return state.error || `Provider test failed with status ${state.status_code || 'unknown'}.`;
+  if (state.ok) return `Healthy response from upstream (${state.status_code}) using token ${esc(state.token_id)}.`;
+  return esc(state.error || `Provider test failed with status ${state.status_code || 'unknown'}.`);
 }
 
 function providerTestMeta(state, provider) {
-  if (!state) return `Endpoint: ${esc(provider.upstream)}`;
-  const parts = [];
-  if (state.test_url) parts.push(`Test URL: ${esc(state.test_url)}`);
-  if (state.latency_ms !== undefined) parts.push(`Latency: ${state.latency_ms}ms`);
-  if (state.attempts && state.attempts > 1) parts.push(`Attempts: ${state.attempts}`);
-  if (state.retry_at) parts.push(`Retry at: ${new Date(state.retry_at).toLocaleTimeString()}`);
-  if (state.checked_at) parts.push(`Checked ${timeAgo(state.checked_at)}`);
+  if (!state) return `<div class="provider-test-line">Endpoint: ${esc(provider.upstream)}</div>`;
+  if (state.batch) {
+    const lines = [];
+    const headerParts = [];
+    if (state.checked_at) headerParts.push(`Checked ${timeAgo(state.checked_at)}`);
+    if (state.tested_tokens !== undefined) headerParts.push(`Connections: ${state.tested_tokens}`);
+    if (headerParts.length) {
+      lines.push(`<div class="provider-test-line">${esc(headerParts.join(' · '))}</div>`);
+    }
+    for (const result of (state.token_results || [])) {
+      lines.push(providerBatchTokenLine(result));
+    }
+    return lines.join('') || `<div class="provider-test-line">Endpoint: ${esc(provider.upstream)}</div>`;
+  }
+  const lines = [];
+  const summaryParts = [];
+  if (state.test_url) summaryParts.push(`Test URL: ${esc(state.test_url)}`);
+  if (state.latency_ms !== undefined) summaryParts.push(`Latency: ${state.latency_ms}ms`);
+  if (state.attempts && state.attempts > 1) summaryParts.push(`Attempts: ${state.attempts}`);
+  if (state.retry_at) summaryParts.push(`Retry at: ${esc(formatRateLimitReset(state.retry_at))}`);
+  if (state.checked_at) summaryParts.push(`Checked ${timeAgo(state.checked_at)}`);
+  if (summaryParts.length) lines.push(summaryParts.join(' · '));
   const limitSummary = rateLimitSummary(state.rate_limits);
-  if (limitSummary) parts.push(`Limits: ${esc(limitSummary)}`);
-  if (state.snippet) parts.push(`Reply: ${esc(state.snippet)}`);
-  if (state.notes && state.notes.length) parts.push(esc(state.notes.join(' · ')));
-  return parts.join(' · ') || `Endpoint: ${esc(provider.upstream)}`;
+  if (limitSummary) lines.push(`Limits: ${esc(limitSummary)}`);
+  const resetSummary = rateLimitResetSummary(state.rate_limits);
+  if (resetSummary) lines.push(`Resets: ${esc(resetSummary)}`);
+  if (state.snippet) lines.push(`Reply: ${esc(state.snippet)}`);
+  if (state.notes && state.notes.length) lines.push(esc(state.notes.join(' · ')));
+  if (!lines.length) lines.push(`Endpoint: ${esc(provider.upstream)}`);
+  return lines.map(line => `<div class="provider-test-line">${line}</div>`).join('');
 }
 
 async function testProvider(name) {
+  await runProviderTest(name);
+}
+
+async function runProviderTest(name, options = {}) {
+  const {
+    reloadAfter = true,
+    toastResult = true,
+  } = options;
   const selectedTokenId = providerSelections[name] || '';
   providerTestState[name] = { pending: true };
   renderProviders(providerCache);
@@ -1335,14 +1351,65 @@ async function testProvider(name) {
     const result = await api(`/api/providers/${encodeURIComponent(name)}/test`, {
       method: 'POST',
       body: JSON.stringify(selectedTokenId ? { token_id: selectedTokenId } : {}),
+      suppressErrorToast: !toastResult,
     });
     providerTestState[name] = result;
-    toast(`${capitalize(name)} test succeeded`);
+    if (toastResult) toast(`${capitalize(name)} test succeeded`);
+    if (reloadAfter) {
+      await loadTokens();
+    } else {
+      renderProviders(providerCache);
+    }
+    return { ok: true, result };
   } catch (e) {
-    providerTestState[name] = { ...(e.data || {}), ok: false };
+    providerTestState[name] = {
+      ...(e.data || {}),
+      ok: false,
+      checked_at: new Date().toISOString(),
+    };
+    if (toastResult) toast(`${capitalize(name)} test failed`, 'error');
+    if (reloadAfter) {
+      await loadTokens();
+    } else {
+      renderProviders(providerCache);
+    }
+    return { ok: false, error: e };
   }
-  // Reload tokens to pick up updated rate limit data from the test response
-  await loadTokens();
+}
+
+async function runTokenTest(tokenId, options = {}) {
+  const { toastResult = false } = options;
+  try {
+    const result = await api(`/api/tokens/${encodeURIComponent(tokenId)}/test`, {
+      method: 'POST',
+      suppressErrorToast: !toastResult,
+    });
+    const normalized = {
+      ...result,
+      token_id: result.token_id || tokenId,
+      status_code: result.status_code ?? result.status ?? 0,
+    };
+    if (toastResult) {
+      toast(
+        normalized.ok
+          ? `Token "${normalized.token_id}" test succeeded`
+          : `Token "${normalized.token_id}" test failed`,
+        normalized.ok ? 'success' : 'error',
+      );
+    }
+    return normalized;
+  } catch (e) {
+    const normalized = {
+      ...(e.data || {}),
+      ok: false,
+      token_id: tokenId,
+      checked_at: new Date().toISOString(),
+      status_code: e.data?.status_code ?? e.data?.status ?? e.status ?? 0,
+      error: e.data?.error || e.message || 'Token test failed',
+    };
+    if (toastResult) toast(`Token "${tokenId}" test failed`, 'error');
+    return normalized;
+  }
 }
 
 function setProviderTokenSelection(name, tokenId) {
@@ -1404,7 +1471,7 @@ async function saveProvider() {
 function renderTokens(tokens) {
   const body = document.getElementById('tokens-body');
   if (!tokens.length) {
-    body.innerHTML = '<div class="empty-state">No tokens configured yet. Add one or run discovery.</div>';
+    body.innerHTML = '<div class="empty-state">No tokens configured yet. Add one to the local token database.</div>';
     return;
   }
   body.innerHTML = `
@@ -1416,6 +1483,7 @@ function renderTokens(tokens) {
           <th>Provider</th>
           <th>Status</th>
           <th>Rate Limit</th>
+          <th>Resets<br><span style="font-weight:400;color:var(--text2)">(5h / 7d)</span></th>
           <th>Expires</th>
           <th>Token</th>
           <th>Priority</th>
@@ -1444,6 +1512,7 @@ function renderTokens(tokens) {
               </span>
             </td>
             <td>${renderRateLimits(t.rate_limits)}</td>
+            <td>${renderRateLimitResets(t.rate_limits)}</td>
             <td class="mono">${esc(t.expires_in)}</td>
             <td class="mono">${esc(t.masked_token)}</td>
             <td>
@@ -1467,7 +1536,13 @@ function renderRateLimits(rl) {
   if (!rl) return '<span class="mono" style="color:var(--text2)">—</span>';
   const windows = rateLimitWindows(rl);
   if (!windows.length) return '<span class="mono" style="color:var(--text2)">—</span>';
-  return `<div class="rl-bars">${windows.map(w => rlBar(w.label, w.utilization, w.status, w.reset)).join('')}</div>`;
+  return `<div class="rl-cell"><div class="rl-bars">${windows.map(w => rlBar(w.label, w.utilization, w.status, w.reset)).join('')}</div></div>`;
+}
+
+function renderRateLimitResets(rl) {
+  const lines = rateLimitResetLines(rl);
+  if (!lines.length) return '<span class="mono" style="color:var(--text2)">—</span>';
+  return `<div class="rl-reset-cell">${lines.map(line => `<div class="rl-reset-line">${esc(line)}</div>`).join('')}</div>`;
 }
 
 function rateLimitWindows(rl) {
@@ -1486,18 +1561,111 @@ function rateLimitWindows(rl) {
 function rateLimitSummary(rl) {
   const windows = rateLimitWindows(rl);
   if (!windows.length) return '';
-  return windows.map(w => `${w.label} ${Math.round((w.utilization || 0) * 100)}%`).join(', ');
+  return windows.map(w => `${w.label} ${rateLimitPercent(w.utilization)}%`).join(', ');
+}
+
+function rateLimitResetSummary(rl) {
+  const windows = rateLimitWindows(rl).filter(w => w && w.reset);
+  if (!windows.length) return '';
+  return windows.map(w => `${w.label} ${formatRateLimitReset(w.reset)}`).join(', ');
+}
+
+function rateLimitResetLines(rl) {
+  const windows = rateLimitWindows(rl);
+  if (!windows.length) return [];
+  const byLabel = new Map(windows.map(w => [String(w.label || ''), w]));
+  const primary = byLabel.get('5h') || byLabel.get('5d');
+  const secondary = byLabel.get('7d');
+  if (!primary?.reset && !secondary?.reset) return [];
+  return [
+    primary?.reset ? formatRateLimitReset(primary.reset) : '—',
+    secondary?.reset ? formatRateLimitReset(secondary.reset) : '—',
+  ];
+}
+
+function rateLimitPercent(util) {
+  const numeric = Number(util);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.round(numeric * 100);
+}
+
+function providerConnections(provider) {
+  return Array.isArray(provider?.tokens) ? provider.tokens : [];
+}
+
+function summarizeBatchProviderTests(results) {
+  const tokenResults = (results || []).map(result => ({
+    token_id: result.token_id,
+    ok: !!result.ok,
+    status_code: result.status_code ?? result.status ?? 0,
+    latency_ms: result.latency_ms,
+    checked_at: result.checked_at,
+    rate_limits: result.rate_limits,
+    snippet: result.snippet,
+    error: result.error,
+  }));
+  const okTokens = tokenResults.filter(result => result.ok).length;
+  return {
+    batch: true,
+    ok: tokenResults.length > 0 && okTokens === tokenResults.length,
+    checked_at: new Date().toISOString(),
+    tested_tokens: tokenResults.length,
+    ok_tokens: okTokens,
+    failed_tokens: tokenResults.length - okTokens,
+    token_results: tokenResults,
+  };
+}
+
+function providerBatchTokenLine(result) {
+  const detailParts = [];
+  const statusCode = result.status_code ?? result.status ?? 0;
+  detailParts.push(`${result.ok ? 'ok' : 'failed'} (${statusCode || 'unknown'})`);
+  if (result.latency_ms !== undefined) detailParts.push(`${result.latency_ms}ms`);
+  const limitSummary = rateLimitSummary(result.rate_limits);
+  if (limitSummary) detailParts.push(limitSummary);
+  const resetSummary = rateLimitResetSummary(result.rate_limits);
+  if (resetSummary) detailParts.push(`resets ${resetSummary}`);
+  if (!result.ok) {
+    const message = result.error || result.snippet;
+    if (message) detailParts.push(message);
+  }
+  return `<div class="provider-test-line"><span class="mono">${esc(result.token_id || 'unknown')}</span>: ${esc(detailParts.join(' · '))}</div>`;
+}
+
+function formatRateLimitReset(value) {
+  if (value === undefined || value === null || value === '') return 'unknown';
+  const raw = String(value).trim();
+  let date = null;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    let numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      if (numeric > 1_000_000_000_000) numeric /= 1000;
+      date = new Date(numeric * 1000);
+    }
+  } else {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) date = parsed;
+  }
+  if (!date || Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function rlBar(label, util, status, reset) {
   if (util === undefined || util === null) return '';
-  const pct = Math.round(util * 100);
+  const pct = rateLimitPercent(util);
+  const barPct = Math.max(0, Math.min(pct, 100));
   const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--orange)' : 'var(--green)';
   const pctColor = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--orange)' : 'var(--text2)';
-  const title = [status, reset ? `reset ${reset}` : ''].filter(Boolean).join(' · ');
+  const title = [status, reset ? `reset ${formatRateLimitReset(reset)}` : ''].filter(Boolean).join(' · ');
   return `<div class="rl-row">
     <span class="rl-label">${esc(label)}</span>
-    <div class="rl-track" title="${esc(title)}"><div class="rl-fill" style="width:${pct}%;background:${color}"></div></div>
+    <div class="rl-track" title="${esc(title)}"><div class="rl-fill" style="width:${barPct}%;background:${color}"></div></div>
     <span class="rl-pct" style="color:${pctColor}">${pct}%</span>
   </div>`;
 }
@@ -1535,108 +1703,12 @@ async function updateTokenPriority(id, value) {
   } catch (e) {}
 }
 
-// ─── Discovery ───────────────────────────────────────────────
-async function runDiscovery() {
-  const body = document.getElementById('discovery-body');
-  body.innerHTML = '<div class="empty-state">Scanning...</div>';
-  const results = await api('/api/discover');
-  renderDiscovery(results);
-}
-
-function renderDiscovery(results) {
-  const body = document.getElementById('discovery-body');
-  if (!results.length) {
-    body.innerHTML = '<div class="empty-state">No OAuth tokens found on this machine.</div>';
-    return;
-  }
-  body.innerHTML = results.map((d, i) => {
-    const statusBadge = d.is_expired
-      ? '<span class="badge badge-expired">EXPIRED</span>'
-      : d.error
-        ? '<span class="badge badge-unhealthy">ERROR</span>'
-        : '<span class="badge badge-active">ACTIVE</span>';
-
-    const plan = d.subscription_type ? ` · ${d.subscription_type}` : '';
-
-    return `
-      <div class="disc-item">
-        <div class="disc-info">
-          <div>
-            <span class="provider-icon ${d.provider}"></span>
-            <span class="badge badge-${d.provider}">${d.provider}</span>
-            ${statusBadge}
-            <span class="mono" style="margin-left:8px">${esc(d.masked_token)}</span>
-            ${plan ? `<span class="mono">${esc(plan)}</span>` : ''}
-          </div>
-          <div class="disc-source">${esc(d.source)}</div>
-          <div class="disc-meta">
-            Expires: ${esc(d.expires_in)}
-            ${d.has_refresh_token ? ' · has refresh token' : ''}
-            ${d.scopes && d.scopes.length ? ` · ${d.scopes.length} scopes` : ''}
-            ${d.error ? ` · Error: ${esc(d.error)}` : ''}
-          </div>
-        </div>
-        <div class="disc-actions">
-          ${!d.is_expired && !d.error ? `
-            <input type="text" class="disc-name-input" id="disc-name-${i}"
-                   placeholder="token name" value="${defaultName(d)}"
-                   style="width:140px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px">
-            <input type="number" id="disc-priority-${i}" value="100" step="1"
-                   title="Priority"
-                   style="width:76px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px">
-            <button class="btn btn-sm btn-primary" onclick='importDiscovered(${i}, ${jsStr(d.source)})'>Import</button>
-          ` : ''}
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function defaultName(d) {
-  if (d.provider === 'openai') return `codex-${d.subscription_type || 'default'}`;
-  const src = d.source.includes(':') ? d.source.split(':')[1] : d.source;
-  return src.toLowerCase().replace(/\s+/g, '-');
-}
-
-async function importDiscovered(index, source) {
-  const nameInput = document.getElementById(`disc-name-${index}`);
-  const priorityInput = document.getElementById(`disc-priority-${index}`);
-  const name = nameInput.value.trim();
-  const priority = Number(priorityInput?.value || 100);
-  if (!name) { toast('Enter a name', 'error'); return; }
-
-  try {
-    const res = await api('/api/discover/import', {
-      method: 'POST',
-      body: JSON.stringify({ tokens: [{ source, name, priority }] }),
-    });
-    if (res.imported && res.imported.length) {
-      toast(`Imported "${res.imported[0]}"`);
-    } else if (res.skipped && res.skipped.length) {
-      toast(`Skipped: ${res.skipped[0].reason}`, 'error');
-    }
-    loadTokens();
-  } catch (e) {}
-}
-
 // ─── Add modals ──────────────────────────────────────────────
 function openAddModal() {
   document.getElementById('add-modal').classList.add('active');
-  switchAddTab('manual');
 }
 function closeAddModal() {
   document.getElementById('add-modal').classList.remove('active');
-}
-
-function switchAddTab(tab) {
-  document.querySelectorAll('#add-tabs .tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-
-  const tabs = ['manual', 'codex', 'keychain'];
-  const idx = tabs.indexOf(tab);
-  document.querySelectorAll('#add-tabs .tab')[idx].classList.add('active');
-  document.getElementById(`tab-${tab}`).classList.add('active');
-
-  if (tab === 'keychain') loadKeychainEntries();
 }
 
 async function addManualToken() {
@@ -1659,100 +1731,6 @@ async function addManualToken() {
     toast(`Token "${name}" added`);
     closeAddModal();
     loadTokens();
-  } catch (e) {}
-}
-
-async function importCodexJson() {
-  const name = document.getElementById('c-name').value.trim();
-  const json = document.getElementById('c-json').value.trim();
-  const priority = Number(document.getElementById('c-priority').value || 100);
-  if (!name || !json) { toast('Name and JSON are required', 'error'); return; }
-
-  try {
-    await api('/api/tokens/import-codex-json', {
-      method: 'POST',
-      body: JSON.stringify({ name, auth_json: json, priority }),
-    });
-    toast(`Codex token "${name}" imported`);
-    closeAddModal();
-    loadTokens();
-  } catch (e) {}
-}
-
-async function loadKeychainEntries() {
-  const body = document.getElementById('keychain-body');
-  body.innerHTML = '<div class="empty-state">Scanning keychain...</div>';
-
-  try {
-    const entries = await api('/api/discover/keychain');
-    if (!entries.length) {
-      body.innerHTML = '<div class="empty-state">No Claude keychain entries found.</div>';
-      return;
-    }
-    body.innerHTML = entries.map((e, i) => {
-      const statusBadge = e.is_expired
-        ? '<span class="badge badge-expired">EXPIRED</span>'
-        : '<span class="badge badge-active">ACTIVE</span>';
-      return `
-        <div class="disc-item">
-          <div class="disc-info">
-            <div>
-              <span class="provider-icon claude"></span>
-              ${statusBadge}
-              <span class="mono" style="margin-left:8px">${esc(e.masked_token)}</span>
-              ${e.subscription_type ? `<span class="mono"> · ${esc(e.subscription_type)}</span>` : ''}
-            </div>
-            <div class="disc-source">${esc(e.service)}</div>
-            <div class="disc-meta">
-              Expires: ${esc(e.expires_in)}
-              ${e.has_refresh_token ? ' · has refresh token' : ''}
-              ${e.scopes ? ` · ${e.scopes.length} scopes` : ''}
-              ${e.error ? ` · ${esc(e.error)}` : ''}
-            </div>
-          </div>
-          <div class="disc-actions">
-            ${(!e.is_expired || e.has_refresh_token) && !e.error ? `
-              <input type="text" id="kc-name-${i}" placeholder="token name"
-                     value="${e.service.toLowerCase().replace(/\\s+/g, '-')}"
-                     style="width:160px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px">
-              <input type="number" id="kc-priority-${i}" value="100" step="1"
-                     title="Priority"
-                     style="width:76px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px">
-              <button class="btn btn-sm btn-primary" onclick='importKeychain(${i}, ${jsStr(e.service)})'>${e.is_expired ? 'Import & Refresh' : 'Import'}</button>
-            ` : ''}
-          </div>
-        </div>`;
-    }).join('');
-  } catch (e) {
-    body.innerHTML = '<div class="empty-state">Failed to scan keychain.</div>';
-  }
-}
-
-async function importKeychain(index, service) {
-  const nameInput = document.getElementById(`kc-name-${index}`);
-  const priorityInput = document.getElementById(`kc-priority-${index}`);
-  const name = nameInput.value.trim();
-  const priority = Number(priorityInput?.value || 100);
-  if (!name) { toast('Enter a name', 'error'); return; }
-
-  try {
-    await api('/api/tokens/import-keychain', {
-      method: 'POST',
-      body: JSON.stringify({ name, service, priority }),
-    });
-    toast(`Claude token "${name}" imported from keychain`);
-    closeAddModal();
-    loadTokens();
-
-    // If the token is expired and has a refresh token, auto-trigger refresh
-    try {
-      const tokens = await api('/api/tokens');
-      const imported = tokens.find(t => t.id === name);
-      if (imported && imported.is_expired && imported.has_refresh_token) {
-        toast(`Token "${name}" is expired, attempting refresh...`);
-        await refreshToken(name);
-      }
-    } catch (e2) {}
   } catch (e) {}
 }
 
@@ -1819,10 +1797,66 @@ async function copyHeroCmd(elementId) {
   }
 }
 
-function refreshAll() {
-  loadTokens();
-  if (document.getElementById('page-logs').classList.contains('active')) loadLogs();
-  toast('Refreshed');
+function setRefreshAllButtonState() {
+  const button = document.getElementById('refresh-all-btn');
+  if (!button) return;
+  button.disabled = refreshAllPending;
+  button.textContent = refreshAllPending ? 'Testing All...' : 'Refresh';
+}
+
+async function refreshAll() {
+  if (refreshAllPending) return;
+  const providersToTest = providerCache
+    .map(provider => ({
+      name: provider.name,
+      tokens: providerConnections(provider),
+    }))
+    .filter(provider => provider.tokens.length);
+
+  if (!providersToTest.length) {
+    await loadTokens();
+    if (document.getElementById('page-logs').classList.contains('active')) loadLogs();
+    toast('No provider connections available to test', 'error');
+    return;
+  }
+
+  refreshAllPending = true;
+  setRefreshAllButtonState();
+  try {
+    const results = [];
+    for (const provider of providersToTest) {
+      providerTestState[provider.name] = {
+        batch: true,
+        pending: true,
+        tested_tokens: provider.tokens.length,
+      };
+    }
+    renderProviders(providerCache);
+
+    for (const provider of providersToTest) {
+      const providerResults = [];
+      for (const token of provider.tokens) {
+        const result = await runTokenTest(token.id, { toastResult: false });
+        providerResults.push(result);
+        results.push(result);
+      }
+      providerTestState[provider.name] = summarizeBatchProviderTests(providerResults);
+      renderProviders(providerCache);
+    }
+    await loadTokens();
+    if (document.getElementById('page-logs').classList.contains('active')) loadLogs();
+    const failed = results.filter(r => !r.ok).length;
+    const succeeded = results.length - failed;
+    const testedLabel = `${results.length} connection${results.length === 1 ? '' : 's'}`;
+    toast(
+      failed
+        ? `Tested ${testedLabel}: ${succeeded} ok, ${failed} failed`
+        : `Tested ${testedLabel} successfully`
+    , failed ? 'error' : 'success');
+  } finally {
+    refreshAllPending = false;
+    setRefreshAllButtonState();
+  }
 }
 
 // ─── Page tabs ──────────────────────────────────────────────

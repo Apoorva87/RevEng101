@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 
 import pytest
 
 from oauthrouter.models import Token, TokenStatus
-from oauthrouter.token_store import TokenStore
+from oauthrouter.token_store import CREATE_TABLE_SQL, TokenStore
 
 
 @pytest.fixture
@@ -146,3 +147,48 @@ async def test_mark_used(store: TokenStore):
     await store.mark_used("test-token")
     token_after = await store.get_token("test-token")
     assert token_after.last_used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_init_db_repairs_legacy_status_values():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(CREATE_TABLE_SQL)
+        conn.execute(
+            "INSERT INTO tokens (id, provider, access_token, status) VALUES (?, ?, ?, ?)",
+            ("legacy-429", "claude", "at-429", "rate_limited"),
+        )
+        conn.execute(
+            "INSERT INTO tokens (id, provider, access_token, status) VALUES (?, ?, ?, ?)",
+            ("legacy-error", "openai", "at-error", "error"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = TokenStore(path)
+    await store.init_db()
+    try:
+        tokens = {token.id: token for token in await store.list_tokens()}
+        assert tokens["legacy-429"].status == TokenStatus.HEALTHY
+        assert tokens["legacy-error"].status == TokenStatus.UNHEALTHY
+    finally:
+        await store.close()
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_get_token_normalizes_bad_status_inserted_after_startup(store: TokenStore):
+    assert store._db is not None
+    await store._db.execute(
+        "INSERT INTO tokens (id, provider, access_token, status) VALUES (?, ?, ?, ?)",
+        ("legacy-late", "claude", "at-late", "rate_limited"),
+    )
+    await store._db.commit()
+
+    token = await store.get_token("legacy-late")
+    assert token is not None
+    assert token.status == TokenStatus.HEALTHY

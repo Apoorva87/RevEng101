@@ -75,20 +75,24 @@ def _normalize_headers(headers: Mapping[str, Any]) -> dict[str, str]:
     return normalized
 
 
-def _parse_fractional_value(value: str) -> Optional[float]:
-    """Parse a utilization-like value and normalize percentages to 0..1."""
+def _parse_fractional_value(value: str, *, allow_overage: bool = False) -> Optional[float]:
+    """Parse a utilization-like value and normalize common percentage formats."""
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return None
     if numeric < 0:
         return None
-    if numeric > 1:
-        if numeric <= 100:
-            numeric /= 100.0
-        else:
-            return None
-    return max(0.0, min(1.0, numeric))
+    if numeric <= 1:
+        return numeric
+    # Anthropic's unified utilization headers report fractional usage and can
+    # legitimately exceed 1.0 when an account is over quota, e.g. "1.01".
+    if allow_overage and numeric < 10:
+        return numeric
+    if numeric <= 100:
+        numeric /= 100.0
+        return numeric
+    return None
 
 
 def _parse_number(value: str) -> Optional[float]:
@@ -276,7 +280,11 @@ def _rate_limit_snapshot_from_headers(headers: Mapping[str, Any]) -> Optional[di
             continue
 
         window = ensure_window(label)
-        util = _parse_fractional_value(util_raw) if util_raw is not None else None
+        util = (
+            _parse_fractional_value(util_raw, allow_overage=True)
+            if util_raw is not None
+            else None
+        )
         if util is not None:
             window["utilization"] = util
             snapshot[f"{label}_utilization"] = util
@@ -565,13 +573,24 @@ app = FastAPI(
 # Portal: serves the web UI at /portal
 # ──────────────────────────────────────────────────────────────────────
 
+def _static_html_response(filename: str) -> HTMLResponse:
+    """Serve a static HTML file from src/oauthrouter/static."""
+    from pathlib import Path
+
+    html_path = Path(__file__).parent / "static" / filename
+    return HTMLResponse(html_path.read_text())
+
+
 @app.get("/portal", response_class=HTMLResponse)
 async def portal_page():
     """Serve the token management web portal."""
-    from pathlib import Path
+    return _static_html_response("portal.html")
 
-    html_path = Path(__file__).parent / "static" / "portal.html"
-    return HTMLResponse(html_path.read_text())
+
+@app.get("/help", response_class=HTMLResponse)
+async def help_page():
+    """Serve the built-in dashboard and endpoint walkthrough."""
+    return _static_html_response("help.html")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1076,339 +1095,6 @@ async def api_update_token(token_id: str, request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "id": final_id, "updated": updated_fields})
 
 
-@app.get("/api/discover")
-async def api_discover(request: Request) -> JSONResponse:
-    """Run token discovery and return what was found."""
-    from oauthrouter.discover import discover_all_tokens
-
-    discovered = discover_all_tokens()
-    results = []
-    for dt in discovered:
-        masked = f"***{dt.access_token[-8:]}" if len(dt.access_token) > 12 else "***"
-        results.append({
-            "source": dt.source,
-            "provider": dt.provider,
-            "is_expired": dt.is_expired,
-            "expires_in": dt.expires_in_human,
-            "subscription_type": dt.subscription_type,
-            "account_id": dt.account_id,
-            "scopes": dt.scopes,
-            "has_refresh_token": dt.refresh_token is not None,
-            "masked_token": masked,
-            "error": dt.error,
-        })
-    return JSONResponse(results)
-
-
-@app.post("/api/discover/import")
-async def api_discover_import(request: Request) -> JSONResponse:
-    """Run discovery and import selected tokens.
-
-    Body: { "tokens": [ { "source": "...", "name": "..." }, ... ] }
-    If body is empty or has no "tokens", imports all active discovered tokens.
-    """
-    from oauthrouter.discover import discover_all_tokens, discovered_token_to_token
-
-    store: TokenStore = request.app.state.store
-    body, error = await _read_json_object(request)
-    if error:
-        return error
-    requested = body.get("tokens")  # list of {source, name}
-    if requested is not None:
-        if not isinstance(requested, list) or any(not isinstance(item, dict) for item in requested):
-            return JSONResponse(
-                {"error": "tokens must be a list of JSON objects"},
-                status_code=400,
-            )
-
-    discovered = discover_all_tokens()
-    imported = []
-    skipped = []
-
-    for dt in discovered:
-        if dt.is_expired or dt.error or not dt.access_token:
-            continue
-
-        # Determine the name for this token
-        if requested:
-            match = next(
-                (r for r in requested if r.get("source") == dt.source), None
-            )
-            if not match:
-                continue
-            name = _string_value(match.get("name"))
-        else:
-            # Auto-name
-            if "codex" in dt.source:
-                name = f"codex-{dt.subscription_type or 'default'}"
-            else:
-                svc = dt.source.split(":", 1)[1] if ":" in dt.source else dt.source
-                name = svc.lower().replace(" ", "-")
-
-        if not name:
-            continue
-
-        # Skip if already exists
-        existing = await store.get_token(name)
-        if existing:
-            skipped.append({"name": name, "reason": "already exists"})
-            logger.info("Portal import: skipping %s (already exists)", name)
-            continue
-
-        try:
-            priority = _parse_priority(match.get("priority") if requested and match else None)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-
-        token = discovered_token_to_token(
-            dt,
-            token_id=name,
-            priority=priority,
-        )
-        await store.add_token(token)
-        imported.append(name)
-        logger.info("Portal import: imported %s (%s)", name, dt.provider)
-
-    return JSONResponse({
-        "imported": imported,
-        "skipped": skipped,
-    })
-
-
-@app.post("/api/tokens/import-codex-json")
-async def api_import_codex_json(request: Request) -> JSONResponse:
-    """Import a token from pasted Codex auth.json content.
-
-    Body: { "name": "my-codex", "auth_json": "{ ... raw auth.json ... }",
-            "priority": 100 }
-    """
-    import base64
-    import json as json_mod
-
-    store: TokenStore = request.app.state.store
-    body, error = await _read_json_object(request)
-    if error:
-        return error
-
-    name = _string_value(body.get("name"))
-    auth_json_raw = _string_value(body.get("auth_json"))
-    try:
-        priority = _parse_priority(body.get("priority"), 100)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-
-    if not name or not auth_json_raw:
-        return JSONResponse(
-            {"error": "name and auth_json are required"}, status_code=400
-        )
-
-    existing = await store.get_token(name)
-    if existing:
-        return JSONResponse(
-            {"error": f"Token '{name}' already exists. Delete it first or use a different name."},
-            status_code=409,
-        )
-
-    try:
-        data = json_mod.loads(auth_json_raw)
-    except json_mod.JSONDecodeError as exc:
-        return JSONResponse({"error": f"Invalid JSON: {exc}"}, status_code=400)
-
-    tokens_data = data.get("tokens", {})
-    access_token = tokens_data.get("access_token", "")
-    refresh_token = tokens_data.get("refresh_token")
-    account_id = tokens_data.get("account_id")
-
-    if not access_token:
-        api_key = data.get("OPENAI_API_KEY")
-        if api_key:
-            access_token = api_key
-        else:
-            return JSONResponse(
-                {"error": "No access_token or OPENAI_API_KEY found in the JSON"},
-                status_code=400,
-            )
-
-    # Decode JWT expiry
-    expires_at = None
-    try:
-        parts = access_token.split(".")
-        if len(parts) == 3:
-            payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
-            claims = json_mod.loads(base64.urlsafe_b64decode(payload))
-            exp = claims.get("exp")
-            if exp:
-                expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
-    except Exception:
-        pass
-
-    token = Token(
-        id=name,
-        provider="openai",
-        access_token=access_token,
-        refresh_token=refresh_token,
-        account_id=account_id,
-        expires_at=expires_at,
-        priority=priority,
-    )
-    await store.add_token(token)
-    logger.info("Portal: imported Codex JSON as %s", name)
-
-    return JSONResponse({"ok": True, "id": name}, status_code=201)
-
-
-@app.get("/api/discover/keychain")
-async def api_discover_keychain(request: Request) -> JSONResponse:
-    """Scan keychain for all Claude-related credential entries."""
-    from oauthrouter.discover import (
-        CLAUDE_KEYCHAIN_SERVICES,
-        _read_keychain_password,
-    )
-    import json as json_mod
-
-    # Also scan for any other entries we might have missed
-    extra_services = [
-        "Claude Code-credentials-3",
-        "Claude Code-credentials-4",
-    ]
-
-    results = []
-    for service in CLAUDE_KEYCHAIN_SERVICES + extra_services:
-        raw = _read_keychain_password(service)
-        if raw is None:
-            continue
-
-        try:
-            data = json_mod.loads(raw)
-        except json_mod.JSONDecodeError:
-            results.append({
-                "service": service,
-                "error": "Invalid JSON",
-                "has_oauth": False,
-            })
-            continue
-
-        oauth = data.get("claudeAiOauth")
-        if not oauth:
-            continue
-
-        exp_ms = oauth.get("expiresAt", 0)
-        expires_at = None
-        is_expired = False
-        expires_in = "unknown"
-        if exp_ms:
-            expires_at = datetime.fromtimestamp(exp_ms / 1000, tz=timezone.utc)
-            delta = expires_at - datetime.now(timezone.utc)
-            is_expired = delta.total_seconds() < 0
-            secs = int(abs(delta.total_seconds()))
-            h, rem = divmod(secs, 3600)
-            m, _ = divmod(rem, 60)
-            expires_in = f"EXPIRED {h}h {m}m ago" if is_expired else f"{h}h {m}m"
-
-        at = oauth.get("accessToken", "")
-        masked = f"***{at[-8:]}" if len(at) > 12 else "***"
-
-        results.append({
-            "service": service,
-            "has_oauth": True,
-            "is_expired": is_expired,
-            "expires_in": expires_in,
-            "subscription_type": oauth.get("subscriptionType"),
-            "rate_limit_tier": oauth.get("rateLimitTier"),
-            "scopes": oauth.get("scopes", []),
-            "has_refresh_token": bool(oauth.get("refreshToken")),
-            "masked_token": masked,
-        })
-
-    return JSONResponse(results)
-
-
-@app.post("/api/tokens/import-keychain")
-async def api_import_keychain(request: Request) -> JSONResponse:
-    """Import a Claude token from a specific keychain service.
-
-    Body: { "name": "my-claude", "service": "Claude Code-credentials" }
-    """
-    import json as json_mod
-
-    from oauthrouter.discover import _read_keychain_password
-
-    store: TokenStore = request.app.state.store
-    body, error = await _read_json_object(request)
-    if error:
-        return error
-
-    name = _string_value(body.get("name"))
-    service = _string_value(body.get("service"))
-    try:
-        priority = _parse_priority(body.get("priority"), 100)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-
-    if not name or not service:
-        return JSONResponse(
-            {"error": "name and service are required"}, status_code=400
-        )
-
-    existing = await store.get_token(name)
-    if existing:
-        return JSONResponse(
-            {"error": f"Token '{name}' already exists. Delete it first or use a different name."},
-            status_code=409,
-        )
-
-    raw = _read_keychain_password(service)
-    if raw is None:
-        return JSONResponse(
-            {"error": f"Keychain entry '{service}' not found or access denied"},
-            status_code=404,
-        )
-
-    try:
-        data = json_mod.loads(raw)
-    except json_mod.JSONDecodeError as exc:
-        return JSONResponse({"error": f"Invalid JSON in keychain: {exc}"}, status_code=400)
-
-    oauth = data.get("claudeAiOauth")
-    if not oauth:
-        return JSONResponse(
-            {"error": "No claudeAiOauth found in keychain entry"},
-            status_code=400,
-        )
-
-    expires_at = None
-    exp_ms = oauth.get("expiresAt")
-    if exp_ms:
-        expires_at = datetime.fromtimestamp(exp_ms / 1000, tz=timezone.utc)
-
-    # Extract per-credential oauthClientId and scopes
-    oauth_client_id = data.get("oauthClientId")
-    scopes_list = oauth.get("scopes", [])
-    scopes = " ".join(scopes_list) if scopes_list else None
-
-    token = Token(
-        id=name,
-        provider="claude",
-        access_token=oauth["accessToken"],
-        refresh_token=oauth.get("refreshToken"),
-        oauth_client_id=oauth_client_id,
-        scopes=scopes,
-        expires_at=expires_at,
-        priority=priority,
-    )
-    await store.add_token(token)
-    logger.info(
-        "Portal: imported keychain %s as %s (client_id=%s, scopes=%s)",
-        service, name, oauth_client_id, scopes,
-    )
-
-    return JSONResponse({"ok": True, "id": name}, status_code=201)
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Token refresh endpoint
-# ──────────────────────────────────────────────────────────────────────
-
 @app.post("/api/tokens/{token_id}/refresh")
 async def api_refresh_token(token_id: str, request: Request) -> JSONResponse:
     """Manually trigger an OAuth refresh for a token.
@@ -1608,6 +1294,19 @@ async def api_test_token(token_id: str, request: Request) -> JSONResponse:
                 "token_id": token_id,
             }
         )
+
+
+@app.api_route(
+    "/api/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+async def api_not_found(path: str) -> JSONResponse:
+    """Return a clean 404 for unknown API paths before proxy catch-all matching."""
+    normalized = f"/api/{path}".rstrip("/") if path else "/api"
+    return JSONResponse(
+        {"error": f"API endpoint '{normalized}' not found"},
+        status_code=404,
+    )
 
 
 @app.api_route(

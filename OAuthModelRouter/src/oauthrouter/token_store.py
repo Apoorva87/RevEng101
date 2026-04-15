@@ -56,6 +56,7 @@ class TokenStore:
                 await self._db.execute(sql)
             except Exception:
                 pass  # Column already exists
+        await self._repair_legacy_statuses()
         await self._db.commit()
         logger.info("Token store initialized at %s", self._db_path)
 
@@ -71,7 +72,80 @@ class TokenStore:
         for field in ("expires_at", "last_used_at", "created_at"):
             if d.get(field):
                 d[field] = datetime.fromisoformat(d[field])
+        d["status"] = self._normalize_status(d.get("status"))
         return Token(**d)
+
+    async def _repair_legacy_statuses(self) -> None:
+        """Normalize old helper-script statuses into the app's DB model.
+
+        The router only persists healthy/unhealthy. Older local helpers also
+        wrote transient or unsupported values such as "rate_limited" and
+        "error", which can otherwise break reads or leave tokens stuck in a
+        stale state.
+        """
+        assert self._db is not None
+
+        repairs = [
+            (
+                "UPDATE tokens SET status = ? WHERE LOWER(COALESCE(status, '')) = ?",
+                (TokenStatus.HEALTHY.value, "rate_limited"),
+            ),
+            (
+                "UPDATE tokens SET status = ? WHERE LOWER(COALESCE(status, '')) = ?",
+                (TokenStatus.UNHEALTHY.value, "error"),
+            ),
+            (
+                "UPDATE tokens SET status = ? "
+                "WHERE TRIM(COALESCE(status, '')) = '' "
+                "OR LOWER(status) NOT IN (?, ?)",
+                (
+                    TokenStatus.UNHEALTHY.value,
+                    TokenStatus.HEALTHY.value,
+                    TokenStatus.UNHEALTHY.value,
+                ),
+            ),
+        ]
+
+        repaired_rows = 0
+        for sql, params in repairs:
+            cursor = await self._db.execute(sql, params)
+            if cursor.rowcount and cursor.rowcount > 0:
+                repaired_rows += cursor.rowcount
+
+        if repaired_rows:
+            logger.info(
+                "Normalized %d legacy token status row(s) in %s",
+                repaired_rows,
+                self._db_path,
+            )
+
+    def _normalize_status(self, raw_status: object) -> TokenStatus:
+        """Map any legacy or unknown stored status into a supported enum."""
+        status_text = str(raw_status or "").strip().lower()
+        if status_text == TokenStatus.HEALTHY.value:
+            return TokenStatus.HEALTHY
+        if status_text == "rate_limited":
+            logger.warning(
+                "Token store read legacy status %r from %s; treating it as healthy",
+                raw_status,
+                self._db_path,
+            )
+            return TokenStatus.HEALTHY
+        if status_text in (TokenStatus.UNHEALTHY.value, "error", ""):
+            if status_text == "error":
+                logger.warning(
+                    "Token store read legacy status %r from %s; treating it as unhealthy",
+                    raw_status,
+                    self._db_path,
+                )
+            return TokenStatus.UNHEALTHY
+
+        logger.warning(
+            "Token store read unknown status %r from %s; treating it as unhealthy",
+            raw_status,
+            self._db_path,
+        )
+        return TokenStatus.UNHEALTHY
 
     async def add_token(self, token: Token) -> None:
         """Insert a new token into the store."""
