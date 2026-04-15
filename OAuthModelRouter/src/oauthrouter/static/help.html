@@ -303,7 +303,8 @@
       <h1>Dashboard walkthrough and endpoint map</h1>
       <p class="lede">
         This page explains how the current DB-backed dashboard works, how the browser code in
-        <span class="mono">src/oauthrouter/static/portal.html</span> talks to the FastAPI server in
+        <span class="mono">src/oauthrouter/static/portal.html</span> and
+        <span class="mono">src/oauthrouter/static/portal.js</span> talks to the FastAPI app assembled in
         <span class="mono">src/oauthrouter/server.py</span>, and what every HTTP endpoint is responsible for.
       </p>
       <div class="hero-actions">
@@ -376,7 +377,7 @@
           <div class="step">
             <h3>6. Logs tab</h3>
             <p>
-              The logs page reads from the in-memory proxy trace buffer:
+              The logs page reads recent proxy traces from the persisted trace store:
             </p>
             <ul>
               <li><span class="mono">loadLogs()</span> → <span class="mono">GET /api/logs</span></li>
@@ -390,16 +391,32 @@
       <div class="card">
         <div class="card-head">
           <h2>Key files</h2>
-          <p>The dashboard is spread across one HTML file plus server and routing helpers.</p>
+          <p>The dashboard is split across static assets plus focused route and service modules.</p>
         </div>
         <div class="card-body path-list">
           <div class="path-item">
             <strong><span class="mono">src/oauthrouter/static/portal.html</span></strong>
-            <p>Markup, CSS, and the full dashboard client-side controller.</p>
+            <p>Dashboard markup shell.</p>
           </div>
           <div class="path-item">
-            <strong><span class="mono">src/oauthrouter/server.py</span></strong>
+            <strong><span class="mono">src/oauthrouter/static/portal.css</span></strong>
+            <p>Dashboard styling extracted from the HTML shell.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/static/portal.js</span></strong>
+            <p>Dashboard client controller, rendering, polling, and action handlers.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/routes/*.py</span></strong>
             <p>Page routes, JSON APIs, health route, request log APIs, and the catch-all proxy route.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/probes.py</span></strong>
+            <p>Shared provider/token probe building, execution, and response normalization.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/trace_store.py</span></strong>
+            <p>Recent trace caching plus background persistence and retention under <span class="mono">~/.oauthrouter/logs</span>.</p>
           </div>
           <div class="path-item">
             <strong><span class="mono">src/oauthrouter/token_store.py</span></strong>
@@ -448,8 +465,8 @@
               <tr><td><code>PATCH</code></td><td><code>/api/providers/{provider_name}</code></td><td><span class="tag tag-live">live</span></td><td>Edits provider config such as upstream URL, auth header, token endpoint, or extra headers.</td></tr>
               <tr><td><code>POST</code></td><td><code>/api/providers/{provider_name}/test</code></td><td><span class="tag tag-live">live</span></td><td>Runs a live provider probe, with failover/cooldown behavior when appropriate.</td></tr>
               <tr><td><code>GET</code></td><td><code>/health</code></td><td><span class="tag tag-live">live</span></td><td>Returns high-level health based on healthy token counts per provider.</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/logs</code></td><td><span class="tag tag-live">live</span></td><td>Returns recent proxy request summaries from the in-memory ring buffer.</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/logs/{log_id}</code></td><td><span class="tag tag-live">live</span></td><td>Returns the detailed trace for a single proxied request.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/logs</code></td><td><span class="tag tag-live">live</span></td><td>Returns recent proxy request summaries from the persisted trace store index.</td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/logs/{log_id}</code></td><td><span class="tag tag-live">live</span></td><td>Returns the detailed trace for a single proxied request from memory or disk.</td></tr>
               <tr><td><code>ANY</code></td><td><code>/{provider}/{path:path}</code></td><td><span class="tag tag-live">live</span></td><td>Catch-all proxy route for forwarded OpenAI/Claude traffic. This must stay last in the router registration order.</td></tr>
             </tbody>
           </table>
@@ -487,8 +504,8 @@
             <h3>Catch-all proxy</h3>
             <p>
               The final route is the real proxy entrypoint. It forwards requests through <span class="mono">forward_request()</span>,
-              records trace attempts, stores summary rows in the in-memory log buffer, and keeps detailed traces under
-              <span class="mono">request_details</span>.
+              records trace attempts, keeps recent summaries in memory for the dashboard, and persists full traces under
+              <span class="mono">~/.oauthrouter/logs/</span>.
             </p>
           </div>
         </div>

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".oauthrouter"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 DB_PATH = CONFIG_DIR / "tokens.db"
+LOG_DIR = CONFIG_DIR / "logs"
 
 DEFAULT_PROVIDERS = {
     "claude": ProviderConfig(

@@ -7,9 +7,11 @@ import tempfile
 
 import httpx
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from oauthrouter.models import AppConfig, ProviderConfig, ServerConfig, Token
+from oauthrouter.token_manager import TokenManager
 from oauthrouter.token_store import TokenStore
 
 
@@ -136,6 +138,25 @@ def test_body_trace_preserves_text_and_binary_payloads():
     assert binary["size_bytes"] == 2
 
 
+def test_headers_for_trace_redacts_sensitive_headers():
+    """Trace logs should not persist raw auth or cookie headers."""
+    from oauthrouter.proxy import _headers_for_trace
+
+    headers = _headers_for_trace(
+        {
+            "Authorization": "Bearer secret",
+            "x-api-key": "sk-test",
+            "Cookie": "session=abc",
+            "content-type": "application/json",
+        }
+    )
+
+    assert headers["Authorization"] == "***redacted***"
+    assert headers["x-api-key"] == "***redacted***"
+    assert headers["Cookie"] == "***redacted***"
+    assert headers["content-type"] == "application/json"
+
+
 def test_log_detail_route_exists():
     """The portal can fetch full request/response traces by log ID."""
     from oauthrouter.server import app
@@ -192,3 +213,126 @@ def test_proxy_route_exists():
         route.path for route in app.routes if hasattr(route, "path")
     ]
     assert "/{provider}/{path:path}" in paths
+
+
+def _request(
+    path: str,
+    *,
+    method: str = "POST",
+    body: bytes = b'{"hello":"world"}',
+) -> Request:
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "scheme": "http",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    return Request(scope, receive)
+
+
+@pytest.mark.asyncio
+async def test_forward_request_updates_rate_limits_from_regular_proxy_response(
+    store: TokenStore,
+    config: AppConfig,
+):
+    """Live proxy traffic should refresh token rate-limit snapshots from headers."""
+    from oauthrouter.proxy import forward_request
+
+    await store.add_token(Token(id="claude-a", provider="claude", access_token="at-1"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "application/json",
+                "anthropic-ratelimit-unified-status": "ok",
+                "anthropic-ratelimit-unified-5h-utilization": "0.42",
+                "anthropic-ratelimit-unified-5h-status": "ok",
+                "anthropic-ratelimit-unified-5h-reset": "2026-04-15T12:00:00Z",
+                "anthropic-ratelimit-unified-7d-utilization": "0.77",
+                "anthropic-ratelimit-unified-7d-status": "warn",
+                "anthropic-ratelimit-unified-7d-reset": "2026-04-20T12:00:00Z",
+            },
+            json={"ok": True},
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    token_manager = TokenManager(store, http_client, config)
+    snapshots: dict[str, dict] = {}
+
+    response = await forward_request(
+        request=_request("/claude/v1/messages"),
+        provider="claude",
+        path="v1/messages",
+        config=config,
+        token_manager=token_manager,
+        http_client=http_client,
+        rate_limit_snapshots=snapshots,
+    )
+
+    assert response.status_code == 200
+    assert snapshots["claude-a"]["5h_utilization"] == pytest.approx(0.42)
+    assert snapshots["claude-a"]["7d_utilization"] == pytest.approx(0.77)
+
+    await http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_forward_request_updates_rate_limits_for_streaming_proxy_response(
+    store: TokenStore,
+    config: AppConfig,
+):
+    """Streaming proxy responses should update rate limits before the stream is consumed."""
+    from oauthrouter.proxy import forward_request
+
+    await store.add_token(Token(id="claude-stream", provider="claude", access_token="at-2"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "text/event-stream",
+                "anthropic-ratelimit-unified-status": "warn",
+                "anthropic-ratelimit-unified-5h-utilization": "0.91",
+                "anthropic-ratelimit-unified-5h-status": "warn",
+                "anthropic-ratelimit-unified-5h-reset": "2026-04-15T18:00:00Z",
+                "anthropic-ratelimit-unified-7d-utilization": "1.01",
+                "anthropic-ratelimit-unified-7d-status": "rejected",
+                "anthropic-ratelimit-unified-7d-reset": "2026-04-20T18:00:00Z",
+            },
+            content=b"data: hello\n\n",
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    token_manager = TokenManager(store, http_client, config)
+    snapshots: dict[str, dict] = {}
+
+    response = await forward_request(
+        request=_request("/claude/v1/messages"),
+        provider="claude",
+        path="v1/messages",
+        config=config,
+        token_manager=token_manager,
+        http_client=http_client,
+        rate_limit_snapshots=snapshots,
+    )
+
+    assert response.status_code == 200
+    assert snapshots["claude-stream"]["5h_utilization"] == pytest.approx(0.91)
+    assert snapshots["claude-stream"]["7d_utilization"] == pytest.approx(1.01)
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    assert b"data: hello" in b"".join(chunks)
+
+    await http_client.aclose()

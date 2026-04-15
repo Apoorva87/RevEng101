@@ -11,17 +11,20 @@ import httpx
 import pytest
 from fastapi import Request
 
-from oauthrouter.models import AppConfig, ProviderConfig, ServerConfig, Token
-from oauthrouter.server import (
+from oauthrouter.probes import (
     OPENAI_USAGE_URL,
-    _openai_usage_snapshot,
-    _probe_request_for_token,
-    _probe_snippet,
-    _rate_limit_snapshot_from_headers,
-    api_not_found,
-    api_test_provider,
-    token_rate_limits,
+    ProbeService,
+    probe_request_for_token,
+    probe_snippet,
 )
+from oauthrouter.rate_limits import (
+    openai_usage_snapshot,
+    rate_limit_snapshot_from_headers,
+)
+from oauthrouter.rate_limit_store import RateLimitStore
+from oauthrouter.routes.api import api_test_provider
+from oauthrouter.routes.proxy import api_not_found
+from oauthrouter.models import AppConfig, ProviderConfig, ServerConfig, Token
 from oauthrouter.token_manager import TokenManager
 from oauthrouter.token_store import TokenStore
 
@@ -55,13 +58,6 @@ async def store():
     yield s
     await s.close()
     os.unlink(path)
-
-
-@pytest.fixture(autouse=True)
-def clear_rate_limits():
-    token_rate_limits.clear()
-    yield
-    token_rate_limits.clear()
 
 
 def _request_with_app(app, body: dict | None = None) -> Request:
@@ -100,7 +96,7 @@ def test_probe_request_for_openai_uses_usage_endpoint(config: AppConfig):
         account_id="user-123",
     )
 
-    method, url, headers, body = _probe_request_for_token(
+    method, url, headers, body = probe_request_for_token(
         "openai",
         config.providers["openai"],
         token,
@@ -116,7 +112,7 @@ def test_probe_request_for_openai_uses_usage_endpoint(config: AppConfig):
 def test_probe_request_for_claude_adds_required_headers(config: AppConfig):
     token = Token(id="claude", provider="claude", access_token="token-abc")
 
-    method, url, headers, body = _probe_request_for_token(
+    method, url, headers, body = probe_request_for_token(
         "claude",
         config.providers["claude"],
         token,
@@ -131,7 +127,7 @@ def test_probe_request_for_claude_adds_required_headers(config: AppConfig):
 
 
 def test_rate_limit_snapshot_parses_anthropic_windows():
-    snapshot = _rate_limit_snapshot_from_headers(
+    snapshot = rate_limit_snapshot_from_headers(
         {
             "anthropic-ratelimit-unified-status": "ok",
             "anthropic-ratelimit-unified-5h-utilization": "0.25",
@@ -151,7 +147,7 @@ def test_rate_limit_snapshot_parses_anthropic_windows():
 
 
 def test_rate_limit_snapshot_preserves_anthropic_overage_utilization():
-    snapshot = _rate_limit_snapshot_from_headers(
+    snapshot = rate_limit_snapshot_from_headers(
         {
             "anthropic-ratelimit-unified-status": "rejected",
             "anthropic-ratelimit-unified-7d-utilization": "1.01",
@@ -174,7 +170,7 @@ def test_rate_limit_snapshot_preserves_anthropic_overage_utilization():
 
 
 def test_rate_limit_snapshot_parses_generic_windows():
-    snapshot = _rate_limit_snapshot_from_headers(
+    snapshot = rate_limit_snapshot_from_headers(
         {
             "x-ratelimit-limit-requests-5d": "100",
             "x-ratelimit-remaining-requests-5d": "40",
@@ -193,7 +189,7 @@ def test_rate_limit_snapshot_parses_generic_windows():
 
 
 def test_openai_usage_snapshot_parses_wham_usage():
-    snapshot = _openai_usage_snapshot(
+    snapshot = openai_usage_snapshot(
         {
             "plan_type": "plus",
             "rate_limit": {
@@ -222,7 +218,7 @@ def test_openai_usage_snapshot_parses_wham_usage():
 
 
 def test_probe_snippet_handles_openai_array_content():
-    snippet = _probe_snippet(
+    snippet = probe_snippet(
         "openai",
         {
             "choices": [
@@ -276,12 +272,18 @@ async def test_api_test_provider_returns_rate_limits_for_openai(
     )
     http_client = StubAsyncClient(response)
     token_manager = TokenManager(store, http_client, config)
+    rate_limits = RateLimitStore()
+    probes = ProbeService(config, store, token_manager, http_client, rate_limits)
     app = SimpleNamespace(
         state=SimpleNamespace(
-            config=config,
-            store=store,
-            token_manager=token_manager,
-            http_client=http_client,
+            services=SimpleNamespace(
+                config=config,
+                store=store,
+                token_manager=token_manager,
+                http_client=http_client,
+                rate_limits=rate_limits,
+                probes=probes,
+            )
         )
     )
 
@@ -337,12 +339,18 @@ async def test_api_test_provider_allows_selected_unhealthy_token_and_recovers_it
     )
     http_client = StubAsyncClient(response)
     token_manager = TokenManager(store, http_client, config)
+    rate_limits = RateLimitStore()
+    probes = ProbeService(config, store, token_manager, http_client, rate_limits)
     app = SimpleNamespace(
         state=SimpleNamespace(
-            config=config,
-            store=store,
-            token_manager=token_manager,
-            http_client=http_client,
+            services=SimpleNamespace(
+                config=config,
+                store=store,
+                token_manager=token_manager,
+                http_client=http_client,
+                rate_limits=rate_limits,
+                probes=probes,
+            )
         )
     )
 

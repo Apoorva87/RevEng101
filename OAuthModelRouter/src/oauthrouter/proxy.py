@@ -7,13 +7,14 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, MutableMapping, Optional, Union
 
 import httpx
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
 from oauthrouter.models import AppConfig, ProviderConfig, Token
+from oauthrouter.rate_limits import update_token_rate_limits_from_headers
 from oauthrouter.token_manager import (
     NoHealthyTokensError,
     NoUsableTokensError,
@@ -42,6 +43,14 @@ AUTH_HEADERS = frozenset(
         "authorization",
         "x-api-key",
         "api-key",
+    }
+)
+
+TRACE_REDACTED_HEADERS = frozenset(
+    {
+        *AUTH_HEADERS,
+        "cookie",
+        "set-cookie",
     }
 )
 
@@ -84,7 +93,15 @@ def _body_for_trace(body: bytes) -> dict[str, Any]:
 
 def _headers_for_trace(headers: Union[dict[str, str], httpx.Headers]) -> dict[str, str]:
     """Convert headers into a stable plain dict for trace JSON."""
-    return {str(k): str(v) for k, v in headers.items()}
+    traced: dict[str, str] = {}
+    for key, value in headers.items():
+        header_name = str(key)
+        traced[header_name] = (
+            "***redacted***"
+            if header_name.lower() in TRACE_REDACTED_HEADERS
+            else str(value)
+        )
+    return traced
 
 
 def _record_attempt_request(
@@ -279,6 +296,7 @@ async def forward_request(
     token_manager: TokenManager,
     http_client: httpx.AsyncClient,
     trace: Optional[dict[str, Any]] = None,
+    rate_limit_snapshots: Optional[MutableMapping[str, dict[str, Any]]] = None,
 ) -> Response:
     """Forward an incoming request to the appropriate upstream provider.
 
@@ -348,6 +366,15 @@ async def forward_request(
         token.id,
     )
 
+    def update_rate_limits(token_id: str, response: httpx.Response) -> None:
+        if rate_limit_snapshots is None:
+            return
+        update_token_rate_limits_from_headers(
+            rate_limit_snapshots,
+            token_id,
+            response.headers,
+        )
+
     # Forward the request
     attempt = _record_attempt_request(
         trace,
@@ -365,6 +392,7 @@ async def forward_request(
         body=body,
         request_id=request_id,
     )
+    update_rate_limits(token.id, response)
 
     # Treat provider rate limits as token/account exhaustion and try another token.
     if response.status_code == 429:
@@ -423,6 +451,7 @@ async def forward_request(
             body=body,
             request_id=request_id,
         )
+        update_rate_limits(token.id, response)
 
     if response.status_code == 429:
         cooldown_until = _cooldown_until_from_headers(response.headers)
@@ -477,6 +506,7 @@ async def forward_request(
             body=body,
             request_id=request_id,
         )
+        update_rate_limits(next_token.id, response)
 
         if response.status_code in (401, 403):
             logger.warning(
