@@ -14,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
 from oauthrouter.models import AppConfig, ProviderConfig, Token
-from oauthrouter.rate_limits import update_token_rate_limits_from_headers
+from oauthrouter.rate_limits import rate_limit_snapshot_from_headers
 from oauthrouter.token_manager import (
     NoHealthyTokensError,
     NoUsableTokensError,
@@ -369,11 +369,9 @@ async def forward_request(
     def update_rate_limits(token_id: str, response: httpx.Response) -> None:
         if rate_limit_snapshots is None:
             return
-        update_token_rate_limits_from_headers(
-            rate_limit_snapshots,
-            token_id,
-            response.headers,
-        )
+        snapshot = rate_limit_snapshot_from_headers(response.headers)
+        if snapshot:
+            rate_limit_snapshots[token_id] = snapshot
 
     # Forward the request
     attempt = _record_attempt_request(
@@ -596,6 +594,10 @@ async def _do_request(
     return response
 
 
+# Cap traced streaming body at 64KB to avoid unbounded memory growth
+_MAX_STREAM_TRACE_BYTES = 64 * 1024
+
+
 async def _stream_response(
     response: httpx.Response,
     request_id: str,
@@ -603,11 +605,14 @@ async def _stream_response(
 ) -> AsyncIterator[bytes]:
     """Yield chunks from an upstream streaming response."""
     total_bytes = 0
-    chunks: list[bytes] = []
+    traced_chunks: list[bytes] = []
+    traced_bytes = 0
     try:
         async for chunk in response.aiter_bytes():
             total_bytes += len(chunk)
-            chunks.append(chunk)
+            if traced_bytes < _MAX_STREAM_TRACE_BYTES:
+                traced_chunks.append(chunk)
+                traced_bytes += len(chunk)
             yield chunk
     except httpx.HTTPError as exc:
         logger.error(
@@ -618,10 +623,14 @@ async def _stream_response(
         )
     finally:
         if attempt is not None:
+            body = _body_for_trace(b"".join(traced_chunks))
+            if total_bytes > traced_bytes:
+                body["stream_truncated"] = True
+                body["stream_total_bytes"] = total_bytes
             attempt["response"] = {
                 "status": response.status_code,
                 "headers": _headers_for_trace(response.headers),
-                "body": _body_for_trace(b"".join(chunks)),
+                "body": body,
                 "streaming": True,
             }
         await response.aclose()

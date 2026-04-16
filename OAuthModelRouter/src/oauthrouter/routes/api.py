@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from oauthrouter.app_state import get_app_services
 from oauthrouter.config import save_config
-from oauthrouter.models import ProviderConfig, Token, TokenStatus
+from oauthrouter.models import ProviderConfig, Token, TokenStatus, is_token_expired
 
 router = APIRouter()
 
@@ -59,18 +59,17 @@ def _token_to_dict(token: Token, request: Request) -> dict:
     now = datetime.now(timezone.utc)
     expires_at_iso = token.expires_at.isoformat() if token.expires_at else None
 
-    is_expired = False
+    expired = is_token_expired(token)
     expires_in_human = "unknown"
     if token.expires_at:
         exp = token.expires_at
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
         delta = exp - now
-        is_expired = delta.total_seconds() < 0
         secs = int(abs(delta.total_seconds()))
         hours, remainder = divmod(secs, 3600)
         minutes, _ = divmod(remainder, 60)
-        if is_expired:
+        if expired:
             expires_in_human = f"EXPIRED {hours}h {minutes}m ago"
         elif hours > 0:
             expires_in_human = f"{hours}h {minutes}m"
@@ -83,7 +82,7 @@ def _token_to_dict(token: Token, request: Request) -> dict:
         "provider": token.provider,
         "status": token.status.value,
         "priority": token.priority,
-        "is_expired": is_expired,
+        "is_expired": expired,
         "expires_at": expires_at_iso,
         "expires_in": expires_in_human,
         "has_refresh_token": token.refresh_token is not None,
@@ -106,17 +105,7 @@ def _provider_summary(
     """Serialize provider config and current token coverage for the UI."""
     services = get_app_services(request)
     healthy_tokens = [token for token in tokens if token.status == TokenStatus.HEALTHY]
-    active_tokens = []
-    now = datetime.now(timezone.utc)
-    for token in healthy_tokens:
-        if not token.expires_at:
-            active_tokens.append(token)
-            continue
-        exp = token.expires_at
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        if exp >= now:
-            active_tokens.append(token)
+    active_tokens = [t for t in healthy_tokens if not is_token_expired(t)]
 
     cooling_tokens = []
     for token in healthy_tokens:
@@ -140,7 +129,7 @@ def _provider_summary(
             {
                 "id": token.id,
                 "status": token.status.value,
-                "is_expired": _token_to_dict(token, request)["is_expired"],
+                "is_expired": is_token_expired(token),
                 "priority": token.priority,
             }
             for token in tokens

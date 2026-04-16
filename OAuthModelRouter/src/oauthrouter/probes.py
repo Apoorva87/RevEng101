@@ -194,12 +194,10 @@ class ProbeService:
         started = time.monotonic()
         notes: list[str] = []
         attempts = 0
-        retried_after_429 = False
-        retried_after_auth = False
-        last_response: Optional[httpx.Response] = None
-        last_url: Optional[str] = None
+        can_failover = not requested_token_id
 
-        while True:
+        # Try up to 2 attempts: initial probe + one retry on 429 or auth failure
+        for _ in range(2):
             call = await self._request_probe(
                 provider_name,
                 provider,
@@ -215,47 +213,40 @@ class ProbeService:
             assert test_url is not None
 
             attempts += 1
-            last_response = response
-            last_url = test_url
             self._rate_limits.update_from_headers(token.id, dict(response.headers))
 
-            if response.status_code == 429:
+            # Rate-limited: cool down this token and try the next one
+            if response.status_code == 429 and can_failover and attempts == 1:
                 self._mark_token_rate_limited(token.id, response.headers)
-                if not notes or notes[-1] != f"{token.id} entered cooldown after 429":
-                    notes.append(f"{token.id} entered cooldown after 429")
+                notes.append(f"{token.id} entered cooldown after 429")
+                next_token = await self._pick_next_provider_token(provider_name, token.id)
+                if next_token is not None:
+                    token = next_token
+                    notes.append(f"Retried with {token.id}")
+                    continue
 
-                if not requested_token_id and not retried_after_429:
-                    next_token = await self._pick_next_provider_token(provider_name, token.id)
-                    if next_token is not None:
-                        token = next_token
-                        retried_after_429 = True
-                        notes.append(f"Retried with {token.id}")
-                        continue
-
-            if response.status_code in (401, 403) and not retried_after_auth:
-                recovered_token = await self._token_manager.handle_auth_failure(
-                    token,
-                    provider_name,
-                )
-                retried_after_auth = True
-                if requested_token_id:
-                    recovered_token = None
-                if recovered_token is not None:
-                    token = recovered_token
+            # Auth failure: try refresh + failover
+            if response.status_code in (401, 403) and attempts == 1:
+                recovered = await self._token_manager.handle_auth_failure(token, provider_name)
+                if can_failover and recovered is not None:
+                    token = recovered
                     notes.append(f"Auth failover retried with {token.id}")
                     continue
 
+            # Also mark rate-limited on 429 even when we can't failover
+            if response.status_code == 429:
+                self._mark_token_rate_limited(token.id, response.headers)
+                notes.append(f"{token.id} entered cooldown after 429")
+
             break
 
-        assert last_response is not None
-        assert last_url is not None
-        return await self._build_provider_result(
+        return await self._build_probe_result(
             provider_name=provider_name,
-            provider=provider,
             token=token,
-            response=last_response,
-            test_url=last_url,
+            response=response,
             started=started,
+            provider=provider,
+            test_url=test_url,
             attempts=attempts,
             notes=notes,
         )
@@ -286,7 +277,8 @@ class ProbeService:
         assert response is not None
         self._rate_limits.update_from_headers(token_id, dict(response.headers))
 
-        return await self._build_token_result(
+        return await self._build_probe_result(
+            provider_name=token.provider,
             token=token,
             response=response,
             started=started,
@@ -393,17 +385,18 @@ class ProbeService:
             "status_code": response.status_code,
         }
 
-    async def _build_provider_result(
+    async def _build_probe_result(
         self,
         *,
         provider_name: str,
-        provider: ProviderConfig,
         token: Token,
         response: httpx.Response,
-        test_url: str,
         started: float,
-        attempts: int,
-        notes: list[str],
+        # Provider-test-only fields (omitted for token tests)
+        provider: Optional[ProviderConfig] = None,
+        test_url: Optional[str] = None,
+        attempts: Optional[int] = None,
+        notes: Optional[list[str]] = None,
     ) -> tuple[dict[str, Any], int]:
         response_body = self._response_body(response)
         ok = self._response_ok(provider_name, response, response_body)
@@ -415,62 +408,34 @@ class ProbeService:
             response_body,
         )
 
-        payload = {
-            "ok": ok,
-            "provider": provider_name,
-            "upstream": provider.upstream,
-            "test_url": test_url,
-            "token_id": token.id,
-            "latency_ms": round((time.monotonic() - started) * 1000),
-            "status_code": response.status_code,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-            "retry_after": response.headers.get("retry-after"),
-            "attempts": attempts,
-            "notes": notes,
-            "snippet": snippet,
-        }
-        if rate_limits:
-            payload["rate_limits"] = rate_limits
-
         if ok and token.status == TokenStatus.UNHEALTHY:
             await self._store.mark_healthy(token.id)
 
-        if ok:
-            return payload, 200
-
-        payload["error"] = snippet or response.text[:300] or "Provider test failed"
-        return payload, response.status_code
-
-    async def _build_token_result(
-        self,
-        *,
-        token: Token,
-        response: httpx.Response,
-        started: float,
-    ) -> tuple[dict[str, Any], int]:
-        response_body = self._response_body(response)
-        ok = self._response_ok(token.provider, response, response_body)
-        snippet = probe_snippet(token.provider, response_body, ok)
-        rate_limits = self._rate_limits.update_from_probe(
-            token.id,
-            token.provider,
-            dict(response.headers),
-            response_body,
-        )
-
-        if ok and token.status == TokenStatus.UNHEALTHY:
-            await self._store.mark_healthy(token.id)
-
-        payload = {
+        payload: dict[str, Any] = {
             "ok": ok,
-            "status": response.status_code,
-            "snippet": snippet,
             "token_id": token.id,
+            "snippet": snippet,
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "latency_ms": round((time.monotonic() - started) * 1000),
         }
+
+        # Provider-level probes include richer routing context
+        if provider is not None:
+            payload.update({
+                "provider": provider_name,
+                "upstream": provider.upstream,
+                "test_url": test_url,
+                "status_code": response.status_code,
+                "retry_after": response.headers.get("retry-after"),
+                "attempts": attempts,
+                "notes": notes,
+            })
+        else:
+            payload["status"] = response.status_code
+
         if rate_limits:
             payload["rate_limits"] = rate_limits
+
         if ok:
             return payload, 200
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, Iterable, Optional
 
 from oauthrouter.rate_limits import (
-    update_token_rate_limits_from_headers,
-    update_token_rate_limits_from_probe,
+    openai_usage_snapshot,
+    rate_limit_snapshot_from_headers,
 )
 
 
@@ -35,11 +35,10 @@ class RateLimitStore:
         token_id: str,
         headers: dict[str, Any],
     ) -> Optional[dict[str, Any]]:
-        return update_token_rate_limits_from_headers(
-            self._snapshots,
-            token_id,
-            headers,
-        )
+        snapshot = rate_limit_snapshot_from_headers(headers)
+        if snapshot:
+            self._snapshots[token_id] = snapshot
+        return snapshot
 
     def update_from_probe(
         self,
@@ -48,13 +47,12 @@ class RateLimitStore:
         headers: dict[str, Any],
         body: Any,
     ) -> Optional[dict[str, Any]]:
-        return update_token_rate_limits_from_probe(
-            self._snapshots,
-            token_id,
-            provider_name,
-            headers,
-            body,
-        )
+        header_snapshot = rate_limit_snapshot_from_headers(headers)
+        body_snapshot = openai_usage_snapshot(body) if provider_name == "openai" else None
+        snapshot = body_snapshot or header_snapshot
+        if snapshot:
+            self._snapshots[token_id] = snapshot
+        return snapshot
 
     def update_from_attempts(self, attempts: Iterable[dict[str, Any]]) -> None:
         for attempt in attempts:

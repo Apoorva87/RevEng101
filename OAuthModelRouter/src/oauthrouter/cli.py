@@ -252,7 +252,8 @@ def token_refresh(
                 )
                 raise typer.Exit(1)
 
-            manager = TokenManager(store, http_client)
+            config = load_config()
+            manager = TokenManager(store, http_client, config)
             refreshed = await manager.refresh_token(token)
             if refreshed:
                 typer.echo(

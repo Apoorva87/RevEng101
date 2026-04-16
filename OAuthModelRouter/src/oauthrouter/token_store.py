@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiosqlite
@@ -331,7 +331,7 @@ class TokenStore:
     async def mark_used(self, token_id: str) -> None:
         """Update the last_used_at timestamp for a token."""
         assert self._db is not None
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "UPDATE tokens SET last_used_at = ? WHERE id = ?",
             (now, token_id),

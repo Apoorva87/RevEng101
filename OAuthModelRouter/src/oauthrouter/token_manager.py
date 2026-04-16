@@ -10,7 +10,7 @@ from typing import Optional
 
 import httpx
 
-from oauthrouter.models import AppConfig, Token, TokenStatus
+from oauthrouter.models import AppConfig, Token, TokenStatus, is_token_expired
 from oauthrouter.token_store import TokenStore
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ class TokenManager:
         )
 
         # If the token is expired, try to refresh it before use
-        if self._is_expired(token):
+        if is_token_expired(token):
             logger.info(
                 "[%s] Token %s is expired (expires_at=%s), attempting refresh",
                 request_id,
@@ -234,16 +234,17 @@ class TokenManager:
             if refreshed:
                 token = refreshed
             else:
-                # Refresh failed — mark unhealthy, try next token
+                # Refresh failed — mark unhealthy, try next token (non-recursive)
                 logger.warning(
                     "[%s] Refresh failed for %s, marking unhealthy and trying next",
                     request_id,
                     token.id,
                 )
                 await self._store.mark_unhealthy(token.id)
+                merged_excludes = (exclude_token_ids or set()) | {token.id}
                 return await self.pick_token(
                     provider,
-                    exclude_token_ids=exclude_token_ids,
+                    exclude_token_ids=merged_excludes,
                 )
 
         await self._store.mark_used(token.id)
@@ -416,7 +417,7 @@ class TokenManager:
                 new_refresh = data.get("refresh_token", token.refresh_token)
                 expires_in = data.get("expires_in")
                 new_expires_at = (
-                    datetime.utcnow() + timedelta(seconds=expires_in)
+                    datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                     if expires_in
                     else None
                 )
@@ -445,22 +446,3 @@ class TokenManager:
                 )
                 return None
 
-    @staticmethod
-    def _is_expired(token: Token) -> bool:
-        """Check if a token's access_token has expired."""
-        if token.expires_at is None:
-            return False
-        exp = token.expires_at
-        now = datetime.utcnow()
-        # Normalize both to naive UTC for comparison
-        if exp.tzinfo is not None:
-            exp = exp.replace(tzinfo=None)
-        expired = now >= exp
-        if expired:
-            logger.debug(
-                "Token %s is expired: expires_at=%s, now=%s",
-                token.id,
-                token.expires_at,
-                now,
-            )
-        return expired

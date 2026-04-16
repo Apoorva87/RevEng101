@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -41,7 +41,17 @@ class Token(BaseModel):
         description="Lower values are selected first within a provider",
     )
     last_used_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def is_token_expired(token: Token) -> bool:
+    """Check if a token's access_token has expired (timezone-safe)."""
+    if token.expires_at is None:
+        return False
+    exp = token.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) >= exp
 
 
 class ProviderConfig(BaseModel):
