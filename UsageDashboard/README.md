@@ -1,6 +1,7 @@
 # Usage Dashboard
 
-This repo currently ships four local dashboards/tools:
+This repo currently ships four local dashboards/tools.
+`unified_dashboard.py` is the recommended primary session view; the Claude- and Codex-specific dashboards remain as narrower deep-dive tools.
 
 - `usage_hub_web.py`: browser-based dashboard for Claude and Codex/OpenAI account usage
 - `claude_sessions_dashboard.py`: local Claude Code session/project analytics from `~/.claude`
@@ -97,7 +98,6 @@ UsageDashboard/
   claude_sessions_dashboard.py
   codex_sessions_dashboard.py
   unified_dashboard.py
-  session_tui/                # Standalone Textual Claude session browser
   .local/                     # Local config & credentials (git-ignored)
   Claude/                     # Claude auth scripts & docs
   Codex/                      # Codex/OpenAI auth scripts & docs

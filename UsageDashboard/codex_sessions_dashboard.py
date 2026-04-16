@@ -263,10 +263,12 @@ class CodexSessionApp:
                 "accounts": accounts,
                 "sessions": [],
                 "token_events": [],
+                "limit_events": [],
             }
 
         sessions: list[dict[str, Any]] = []
         token_events: list[dict[str, Any]] = []
+        limit_events: list[dict[str, Any]] = []
 
         for file_path in sorted(sessions_dir.rglob("*.jsonl")):
             session = self._parse_session_file(file_path, accounts)
@@ -286,6 +288,18 @@ class CodexSessionApp:
                         "usage": delta.usage,
                     }
                 )
+            for limit_event in session.get("rate_limit_snapshots", []):
+                limit_events.append(
+                    {
+                        "session_id": session["session_id"],
+                        "session_label": session["session_label"],
+                        "project": session["project"],
+                        "cwd": session["cwd"],
+                        "account_key": session["account_key"],
+                        "account_label": session["account_label"],
+                        **limit_event,
+                    }
+                )
 
         return {
             "sessions_dir": str(sessions_dir),
@@ -294,6 +308,7 @@ class CodexSessionApp:
             "accounts": accounts,
             "sessions": sessions,
             "token_events": token_events,
+            "limit_events": limit_events,
         }
 
     def _discover_accounts(self) -> list[CodexAccount]:
@@ -399,6 +414,7 @@ class CodexSessionApp:
     def _parse_session_file(self, file_path: Path, accounts: list[CodexAccount]) -> dict[str, Any]:
         session_meta: dict[str, Any] = {}
         token_deltas: list[TokenDelta] = []
+        rate_limit_snapshots: list[dict[str, Any]] = []
         previous_total: Optional[dict[str, int]] = None
         first_access: Optional[datetime] = None
         last_access: Optional[datetime] = None
@@ -451,6 +467,22 @@ class CodexSessionApp:
                     agent_messages += 1
                     last_agent_message = str(payload.get("message") or "").strip()
                 elif subtype == "token_count" and timestamp:
+                    rate_limits = payload.get("rate_limits") or {}
+                    if isinstance(rate_limits, dict):
+                        primary = rate_limits.get("primary") or {}
+                        secondary = rate_limits.get("secondary") or {}
+                        rate_limit_snapshots.append(
+                            {
+                                "timestamp": timestamp,
+                                "primary_used_percent": float(primary.get("used_percent")) if primary.get("used_percent") is not None else None,
+                                "primary_window_minutes": int(primary.get("window_minutes") or 0) or None,
+                                "primary_resets_at": int(primary.get("resets_at") or 0) or None,
+                                "secondary_used_percent": float(secondary.get("used_percent")) if secondary.get("used_percent") is not None else None,
+                                "secondary_window_minutes": int(secondary.get("window_minutes") or 0) or None,
+                                "secondary_resets_at": int(secondary.get("resets_at") or 0) or None,
+                                "plan_type": str(rate_limits.get("plan_type") or "").strip() or None,
+                            }
+                        )
                     info = payload.get("info") or {}
                     current_total = normalize_usage(info.get("total_token_usage") or {})
                     latest_context_window = int(info.get("model_context_window") or latest_context_window or 0) or latest_context_window
@@ -500,6 +532,61 @@ class CodexSessionApp:
             "resume_command": resume_command_for(session_id, cwd or None),
             "open_command": open_command_for(working_path),
             "token_deltas": token_deltas,
+            "rate_limit_snapshots": rate_limit_snapshots,
+        }
+
+    def usage_snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            dataset = self._scan_sessions()
+
+        usage_events = []
+        for event in dataset.get("token_events", []):
+            usage = dict(event.get("usage") or {})
+            usage_events.append(
+                {
+                    "provider": "codex",
+                    "timestamp": event["timestamp"].timestamp() if hasattr(event.get("timestamp"), "timestamp") else None,
+                    "session_id": event.get("session_id"),
+                    "session_label": event.get("session_label"),
+                    "project_name": event.get("project") or "(unknown)",
+                    "project_path": event.get("cwd") or event.get("project") or "(unknown)",
+                    "account_key": event.get("account_key") or "unknown",
+                    "account_label": event.get("account_label") or "Unknown",
+                    "usage": {
+                        **usage,
+                        "cached_tokens": int(usage.get("cached_input_tokens") or 0),
+                    },
+                }
+            )
+
+        limit_events = []
+        for event in dataset.get("limit_events", []):
+            limit_events.append(
+                {
+                    "provider": "codex",
+                    "timestamp": event["timestamp"].timestamp() if hasattr(event.get("timestamp"), "timestamp") else None,
+                    "session_id": event.get("session_id"),
+                    "session_label": event.get("session_label"),
+                    "project_name": event.get("project") or "(unknown)",
+                    "project_path": event.get("cwd") or event.get("project") or "(unknown)",
+                    "account_key": event.get("account_key") or "unknown",
+                    "account_label": event.get("account_label") or "Unknown",
+                    "kind": "rate_limits",
+                    "plan_type": event.get("plan_type"),
+                    "primary_used_percent": event.get("primary_used_percent"),
+                    "primary_window_minutes": event.get("primary_window_minutes"),
+                    "primary_resets_at": event.get("primary_resets_at"),
+                    "secondary_used_percent": event.get("secondary_used_percent"),
+                    "secondary_window_minutes": event.get("secondary_window_minutes"),
+                    "secondary_resets_at": event.get("secondary_resets_at"),
+                }
+            )
+
+        return {
+            "provider": "codex",
+            "scanned_at": dataset.get("scanned_at"),
+            "usage_events": usage_events,
+            "limit_events": limit_events,
         }
 
     def _build_payload(

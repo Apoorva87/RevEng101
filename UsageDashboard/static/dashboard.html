@@ -10,62 +10,136 @@
 <div id="progress-bar" style="width:0%"></div>
 
 <div class="page-layout">
-<!-- ── HEADER ── -->
-<div class="page-header">
-  <div class="topbar">
-    <span class="brand">SESSION HUB</span>
-    <div class="tabs" id="provider-tabs">
-      <button class="tab active" data-provider="all">All</button>
+  <div class="page-header">
+    <div class="topbar">
+      <span class="brand">SESSION HUB</span>
+      <div class="tabs" id="provider-tabs">
+        <button class="tab active" data-provider="all">All</button>
+      </div>
+      <div class="topbar-right">
+        <span id="last-update">&mdash;</span>
+        <button class="refresh-btn on" id="refresh-toggle" title="Toggle auto-refresh">Auto</button>
+      </div>
     </div>
-    <div class="topbar-right">
-      <span id="last-update">&mdash;</span>
-      <button class="refresh-btn on" id="refresh-toggle" title="Toggle auto-refresh">Auto</button>
+    <div class="active-strip" id="active-strip"></div>
+    <div id="error-banner"></div>
+    <div class="metrics" id="metrics-row">
+      <div class="metric highlight"><div class="label">Sessions</div><div class="value" id="m-total">&mdash;</div></div>
+      <div class="metric"><div class="label">Active Now</div><div class="value" id="m-active">&mdash;</div></div>
+      <div class="metric warn"><div class="label">Rate Limited</div><div class="value" id="m-ratelimit">&mdash;</div></div>
+      <div class="metric danger"><div class="label">Errors</div><div class="value" id="m-errors">&mdash;</div></div>
+      <div class="metric"><div class="label">Total Tokens</div><div class="value" id="m-tokens">&mdash;</div></div>
+      <div class="metric"><div class="label">Claude Tokens</div><div class="value" id="m-claude">&mdash;</div></div>
+      <div class="metric"><div class="label">Codex Tokens</div><div class="value" id="m-codex">&mdash;</div></div>
+      <div class="metric"><div class="label">Projects</div><div class="value" id="m-projects">&mdash;</div></div>
+    </div>
+    <div class="quick-stats" id="quick-stats"></div>
+    <div class="controls-row">
+      <div class="workspace-tabs" id="workspace-tabs">
+        <button class="pill active" data-view="sessions">Sessions</button>
+        <button class="pill" data-view="usage">Usage</button>
+      </div>
+      <div class="usage-controls hidden" id="usage-controls">
+        <div class="pills" id="usage-preset-pills">
+          <button class="pill" data-preset="6h">6H</button>
+          <button class="pill" data-preset="24h">24H</button>
+          <button class="pill active" data-preset="7d">7D</button>
+          <button class="pill" data-preset="30d">30D</button>
+          <button class="pill" data-preset="90d">90D</button>
+          <button class="pill" data-preset="365d">1Y</button>
+          <button class="pill" data-preset="all">All</button>
+          <button class="pill" data-preset="custom">Custom</button>
+        </div>
+        <label for="usage-bucket">Bucket</label>
+        <select id="usage-bucket">
+          <option value="5m">5m</option>
+          <option value="15m">15m</option>
+          <option value="hour" selected>Hour</option>
+          <option value="day">Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+        </select>
+        <label for="usage-start" id="usage-start-wrap" class="hidden">Start</label>
+        <input type="datetime-local" id="usage-start" class="hidden">
+        <label for="usage-end" id="usage-end-wrap" class="hidden">End</label>
+        <input type="datetime-local" id="usage-end" class="hidden">
+        <button class="zoom-btn hidden" id="usage-apply-range">Apply</button>
+      </div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search" placeholder="Filter sessions… (provider, project, state, session id)" autocomplete="off">
+      <span id="bulk-delete-slot">
+        <span class="inactivity-control"><input type="number" id="inact-days" value="3" min="1" max="365"><span class="unit">days</span></span>
+        <button class="bulk-delete-btn" id="bulk-delete" disabled style="opacity:0.4">Delete 0 inactive</button>
+      </span>
     </div>
   </div>
-  <div class="active-strip" id="active-strip"></div>
-  <div id="error-banner"></div>
-  <div class="metrics" id="metrics-row">
-    <div class="metric highlight"><div class="label">Sessions</div><div class="value" id="m-total">&mdash;</div></div>
-    <div class="metric"><div class="label">Active Now</div><div class="value" id="m-active">&mdash;</div></div>
-    <div class="metric warn"><div class="label">Rate Limited</div><div class="value" id="m-ratelimit">&mdash;</div></div>
-    <div class="metric danger"><div class="label">Errors</div><div class="value" id="m-errors">&mdash;</div></div>
-    <div class="metric"><div class="label">Total Tokens</div><div class="value" id="m-tokens">&mdash;</div></div>
-    <div class="metric"><div class="label">Claude Tokens</div><div class="value" id="m-claude">&mdash;</div></div>
-    <div class="metric"><div class="label">Codex Tokens</div><div class="value" id="m-codex">&mdash;</div></div>
-    <div class="metric"><div class="label">Projects</div><div class="value" id="m-projects">&mdash;</div></div>
-  </div>
-  <div class="quick-stats" id="quick-stats"></div>
-  <div class="search-bar">
-    <input type="text" id="search" placeholder="Filter sessions… (provider, project, state, session id)" autocomplete="off">
-    <span id="bulk-delete-slot">
-      <span class="inactivity-control"><input type="number" id="inact-days" value="3" min="1" max="365"><span class="unit">days</span></span>
-      <button class="bulk-delete-btn" id="bulk-delete" disabled style="opacity:0.4">Delete 0 inactive</button>
-    </span>
-  </div>
-</div>
 
-<!-- ── MIDDLE (scrollable) ── -->
-<div class="page-middle">
-  <div class="table-wrap">
-    <table id="sessions-table">
-      <thead><tr id="table-head">
-        <th data-key="provider">Provider</th>
-        <th data-key="session_id">Session</th>
-        <th data-key="project_name">Project</th>
-        <th data-key="state">State</th>
-        <th data-key="last_activity_at" class="sorted-desc">Last Activity</th>
-        <th data-key="total_tokens">Tokens</th>
-        <th data-key="user_messages">Msgs</th>
-        <th data-key="tool_uses">Tools</th>
-        <th>Actions</th>
-      </tr></thead>
-      <tbody id="table-body"></tbody>
-    </table>
-  </div>
-</div>
+  <div class="page-middle">
+    <div class="view-panel" id="sessions-view">
+      <div class="table-wrap">
+        <table id="sessions-table">
+          <thead><tr id="table-head">
+            <th data-key="provider">Provider</th>
+            <th data-key="session_id">Session</th>
+            <th data-key="project_name">Project</th>
+            <th data-key="state">State</th>
+            <th data-key="last_activity_at" class="sorted-desc">Last Activity</th>
+            <th data-key="total_tokens">Tokens</th>
+            <th data-key="user_messages">Msgs</th>
+            <th data-key="tool_uses">Tools</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </div>
 
-<!-- ── BOTTOM (detail panel) ── -->
-<div class="page-bottom closed" id="detail-panel"></div>
+    <div class="view-panel hidden" id="usage-view">
+      <div class="usage-shell">
+        <div class="usage-summary" id="usage-summary"></div>
+        <div class="usage-card">
+          <div class="usage-head">
+            <div>
+              <div class="label">Token Usage Over Time</div>
+              <div class="usage-title" id="usage-title">Usage Timeline</div>
+            </div>
+            <div class="usage-meta" id="usage-meta"></div>
+          </div>
+          <div class="usage-series" id="usage-series"></div>
+          <div class="zoom-bar">
+            <span class="zoom-label">Zoom</span>
+            <span class="zoom-range" id="usage-zoom-range">All buckets</span>
+            <button class="zoom-btn" id="usage-reset-zoom">Reset</button>
+          </div>
+          <div class="usage-chart-wrap">
+            <svg id="usage-chart-svg" class="usage-chart-svg" role="img" aria-label="Token usage chart"></svg>
+          </div>
+          <div class="selection-summary hidden" id="usage-selection-summary"></div>
+          <div class="usage-chart-tooltip hidden" id="usage-chart-tooltip"></div>
+          <div class="zoom-minimap" id="usage-zoom"></div>
+        </div>
+        <div class="usage-card">
+          <div class="usage-head">
+            <div>
+              <div class="label" id="usage-breakdown-label">Selected Bucket</div>
+              <div class="usage-title" id="usage-breakdown-title">Breakdown</div>
+            </div>
+            <div class="workspace-tabs" id="usage-breakdown-tabs">
+              <button class="pill active" data-breakdown="projects">Projects</button>
+              <button class="pill" data-breakdown="sessions">Sessions</button>
+              <button class="pill" data-breakdown="markers">Markers</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="usage-breakdown-table"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-bottom closed" id="detail-panel"></div>
 </div>
 
 <script src="/static/base.js"></script>
@@ -73,12 +147,31 @@
 (function(){
   var U = window.DashUtils;
   var REFRESH_MS = 12000;
+
   var data = null;
+  var usageData = null;
+  var usageRangeData = null;
+  var usageRangeRequestKey = "";
+  var usageRangeLoading = false;
   var selectedProvider = "all";
   var searchText = "";
   var sortKey = "last_activity_at";
   var sortDir = "desc";
   var selectedSessionId = null;
+  var currentView = "sessions";
+  var usageState = {
+    preset: "7d",
+    bucket: "hour",
+    series: {},
+    breakdown: "projects",
+    selectedBucketStart: null,
+    rangeStart: null,
+    rangeEnd: null,
+    zoomStart: 0,
+    zoomEnd: -1
+  };
+
+  function compact(n){ return U.compact(n); }
 
   function getInactivityDays(){
     var el = document.getElementById("inact-days");
@@ -88,214 +181,1363 @@
     return v;
   }
 
+  function formatUsageTs(ts, bucket){
+    if(!ts) return "\u2014";
+    var date = new Date(ts * 1000);
+    if(bucket === "month"){
+      return date.toLocaleString([], {year:"numeric", month:"short"});
+    }
+    if(bucket === "week" || bucket === "day"){
+      return date.toLocaleString([], {month:"short", day:"numeric", year:"numeric"});
+    }
+    return date.toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"});
+  }
+
+  function formatPercent(value){
+    if(value == null || value === "") return "\u2014";
+    return Math.round(Number(value)) + "%";
+  }
+
+  function toLocalInputValue(ts){
+    if(!ts) return "";
+    var d = new Date(ts * 1000);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0,16);
+  }
+
+  function formatDuration(seconds){
+    var total = Math.max(0, Math.round(Number(seconds || 0)));
+    var days = Math.floor(total / 86400);
+    var hours = Math.floor((total % 86400) / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var parts = [];
+    if(days) parts.push(days + "d");
+    if(hours) parts.push(hours + "h");
+    if(minutes || !parts.length) parts.push(minutes + "m");
+    return parts.join(" ");
+  }
+
+  function formatTokenCount(value){
+    return Math.round(Number(value || 0)).toLocaleString();
+  }
+
+  function usageTooltipHtml(title, rows){
+    return '<div class="usage-tooltip-title">' + U.escHtml(title) + '</div>' +
+      rows.map(function(row){
+        return '<div class="usage-tooltip-row"><span class="usage-tooltip-key">' + U.escHtml(row.label) + '</span><span class="usage-tooltip-value">' + U.escHtml(row.value) + '</span></div>';
+      }).join("");
+  }
+
+  function showUsageTooltip(event, html){
+    var tooltip = document.getElementById("usage-chart-tooltip");
+    tooltip.innerHTML = html;
+    tooltip.classList.remove("hidden");
+    var pad = 14;
+    var left = event.clientX + pad;
+    var top = event.clientY + pad;
+    var rect = tooltip.getBoundingClientRect();
+    if(left + rect.width > window.innerWidth - 12){
+      left = event.clientX - rect.width - pad;
+    }
+    if(top + rect.height > window.innerHeight - 12){
+      top = event.clientY - rect.height - pad;
+    }
+    tooltip.style.left = Math.max(12, left) + "px";
+    tooltip.style.top = Math.max(12, top) + "px";
+  }
+
+  function hideUsageTooltip(){
+    var tooltip = document.getElementById("usage-chart-tooltip");
+    tooltip.classList.add("hidden");
+    tooltip.innerHTML = "";
+  }
+
+  function fromLocalInputValue(value){
+    if(!value) return null;
+    var d = new Date(value);
+    if(Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  }
+
+  function usageBucketCountDefault(bucket){
+    if(bucket === "5m") return 96;
+    if(bucket === "15m") return 96;
+    if(bucket === "hour") return 168;
+    if(bucket === "day") return 60;
+    if(bucket === "week") return 26;
+    return 24;
+  }
+
   var refreshCtrl = U.createRefreshController({
-    interval: REFRESH_MS, onTick: fetchData,
+    interval: REFRESH_MS,
+    onTick: function(){ return refreshCurrentView(); },
     progressBar: document.getElementById("progress-bar"),
     refreshBtn: document.getElementById("refresh-toggle"),
     lastUpdateEl: document.getElementById("last-update")
   });
   document.getElementById("refresh-toggle").onclick = function(){ refreshCtrl.toggle(); };
 
-  document.getElementById("inact-days").addEventListener("input", function(){ render(); });
-
   async function fetchData(){
+    var resp = await fetch("/api/sessions");
+    if(!resp.ok) throw new Error("HTTP " + resp.status);
+    data = await resp.json();
+    renderChrome();
+    renderCurrentView();
+  }
+
+  async function fetchUsageData(){
+    var params = new URLSearchParams();
+    params.set("provider", selectedProvider);
+    params.set("bucket", usageState.bucket);
+    params.set("preset", usageState.preset);
+    if(usageState.preset === "custom"){
+      var startIso = fromLocalInputValue(document.getElementById("usage-start").value);
+      var endIso = fromLocalInputValue(document.getElementById("usage-end").value);
+      if(startIso) params.set("start", startIso);
+      if(endIso) params.set("end", endIso);
+    }
+    var resp = await fetch("/api/usage?" + params.toString());
+    if(!resp.ok) throw new Error("HTTP " + resp.status);
+    usageData = await resp.json();
+    syncUsageState();
+    renderCurrentView();
+    if(usageSelectionBuckets().length){
+      await fetchUsageRangeBreakdown();
+    } else {
+      clearUsageRangeBreakdown();
+    }
+  }
+
+  async function refreshCurrentView(){
     try{
-      var resp = await fetch("/api/sessions");
-      if(!resp.ok) throw new Error("HTTP "+resp.status);
-      data = await resp.json();
-      render();
-      document.getElementById("error-banner").innerHTML = "";
-      if(data.errors && data.errors.length){
-        document.getElementById("error-banner").innerHTML =
-          '<div class="error-banner">'+data.errors.map(function(e){ return U.escHtml(e.provider)+": "+U.escHtml(e.error); }).join("; ")+'</div>';
+      await fetchData();
+      if(currentView === "usage"){
+        await fetchUsageData();
+      } else {
+        document.getElementById("error-banner").innerHTML = "";
       }
     }catch(e){
       document.getElementById("error-banner").innerHTML =
-        '<div class="error-banner">Fetch error: '+U.escHtml(String(e))+'</div>';
+        '<div class="error-banner">Fetch error: ' + U.escHtml(String(e)) + '</div>';
     }
     document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
   }
 
-  function isInactive(s){
-    var ts = s.last_activity_at || 0;
-    return ts > 0 && (Date.now()/1000 - ts) > getInactivityDays() * 86400;
+  function setErrorBanner(message){
+    document.getElementById("error-banner").innerHTML = message ? '<div class="error-banner">' + U.escHtml(message) + '</div>' : "";
+  }
+
+  function renderChrome(){
+    if(!data) return;
+    var m = data.metrics || {};
+    document.getElementById("m-total").textContent = compact(m.total_sessions);
+    document.getElementById("m-active").textContent = compact(m.active_now);
+    document.getElementById("m-ratelimit").textContent = compact(m.rate_limited);
+    document.getElementById("m-errors").textContent = compact(m.errors);
+    document.getElementById("m-tokens").textContent = compact(m.total_tokens);
+    document.getElementById("m-claude").textContent = compact(m.claude_tokens);
+    document.getElementById("m-codex").textContent = compact(m.codex_tokens);
+    document.getElementById("m-projects").textContent = compact(m.projects);
+    renderQuickStats();
+    renderProviderTabs();
+    renderActiveStrip();
+    if(data.errors && data.errors.length){
+      setErrorBanner(data.errors.map(function(e){ return e.provider + ": " + e.error; }).join("; "));
+    } else {
+      setErrorBanner("");
+    }
+  }
+
+  function renderProviderTabs(){
+    var tabsEl = document.getElementById("provider-tabs");
+    var providers = data.providers || [];
+    var html = '<button class="tab ' + (selectedProvider === "all" ? "active" : "") + '" data-provider="all">All</button>';
+    providers.forEach(function(p){
+      html += '<button class="tab ' + (selectedProvider === p.id ? "active" : "") + '" data-provider="' + U.escHtml(p.id) + '">' + U.escHtml(p.label) + '</button>';
+    });
+    tabsEl.innerHTML = html;
+    tabsEl.querySelectorAll(".tab").forEach(function(btn){
+      btn.onclick = async function(){
+        selectedProvider = btn.dataset.provider;
+        selectedSessionId = null;
+        if(currentView === "usage"){
+          clearUsageSelection();
+          await fetchUsageData();
+        } else {
+          renderCurrentView();
+        }
+      };
+    });
   }
 
   function renderQuickStats(){
     if(!data) return;
-    var nowTs=Date.now()/1000;
-    var cutoff5h=nowTs-5*3600;
-    var cutoff7d=nowTs-7*86400;
-    var sessions=data.sessions||[];
-    var h5={i:0,o:0,t:0}, d7={i:0,o:0,t:0};
+    var nowTs = Date.now() / 1000;
+    var cutoff5h = nowTs - 5 * 3600;
+    var cutoff7d = nowTs - 7 * 86400;
+    var sessions = data.sessions || [];
+    var h5 = {i:0, o:0, t:0};
+    var d7 = {i:0, o:0, t:0};
     sessions.forEach(function(s){
-      var ts=s.last_activity_at||0;
+      var ts = s.last_activity_at || 0;
       if(!ts) return;
-      if(ts>=cutoff5h){
-        h5.i+=s.input_tokens||0;
-        h5.o+=s.output_tokens||0;
-        h5.t+=s.total_tokens||0;
+      if(ts >= cutoff5h){
+        h5.i += s.input_tokens || 0;
+        h5.o += s.output_tokens || 0;
+        h5.t += s.total_tokens || 0;
       }
-      if(ts>=cutoff7d){
-        d7.i+=s.input_tokens||0;
-        d7.o+=s.output_tokens||0;
-        d7.t+=s.total_tokens||0;
+      if(ts >= cutoff7d){
+        d7.i += s.input_tokens || 0;
+        d7.o += s.output_tokens || 0;
+        d7.t += s.total_tokens || 0;
       }
     });
-    var el=document.getElementById("quick-stats");
-    el.innerHTML=
-      '<div class="qs-group"><span class="qs-label">5h</span>'+
-        '<span class="qs-item">in <span class="qs-val">'+U.compact(h5.i)+'</span></span>'+
-        '<span class="qs-item">out <span class="qs-val">'+U.compact(h5.o)+'</span></span>'+
-        '<span class="qs-item">total <span class="qs-val">'+U.compact(h5.t)+'</span></span></div>'+
-      '<div class="qs-group"><span class="qs-label">7d</span>'+
-        '<span class="qs-item">in <span class="qs-val">'+U.compact(d7.i)+'</span></span>'+
-        '<span class="qs-item">out <span class="qs-val">'+U.compact(d7.o)+'</span></span>'+
-        '<span class="qs-item">total <span class="qs-val">'+U.compact(d7.t)+'</span></span></div>';
+    document.getElementById("quick-stats").innerHTML =
+      '<div class="qs-group"><span class="qs-label">5h</span>' +
+        '<span class="qs-item">in <span class="qs-val">' + compact(h5.i) + '</span></span>' +
+        '<span class="qs-item">out <span class="qs-val">' + compact(h5.o) + '</span></span>' +
+        '<span class="qs-item">total <span class="qs-val">' + compact(h5.t) + '</span></span></div>' +
+      '<div class="qs-group"><span class="qs-label">7d</span>' +
+        '<span class="qs-item">in <span class="qs-val">' + compact(d7.i) + '</span></span>' +
+        '<span class="qs-item">out <span class="qs-val">' + compact(d7.o) + '</span></span>' +
+        '<span class="qs-item">total <span class="qs-val">' + compact(d7.t) + '</span></span></div>';
   }
 
-  function render(){
-    if(!data) return;
-    var m = data.metrics||{};
-    document.getElementById("m-total").textContent = U.compact(m.total_sessions);
-    document.getElementById("m-active").textContent = U.compact(m.active_now);
-    document.getElementById("m-ratelimit").textContent = U.compact(m.rate_limited);
-    document.getElementById("m-errors").textContent = U.compact(m.errors);
-    document.getElementById("m-tokens").textContent = U.compact(m.total_tokens);
-    document.getElementById("m-claude").textContent = U.compact(m.claude_tokens);
-    document.getElementById("m-codex").textContent = U.compact(m.codex_tokens);
-    document.getElementById("m-projects").textContent = U.compact(m.projects);
-    renderQuickStats();
-
-    // Provider tabs
-    var tabsEl = document.getElementById("provider-tabs");
-    var providers = data.providers||[];
-    var tabsHtml = '<button class="tab '+(selectedProvider==="all"?"active":"")+'" data-provider="all">All</button>';
-    providers.forEach(function(p){
-      tabsHtml += '<button class="tab '+(selectedProvider===p.id?"active":"")+'" data-provider="'+U.escHtml(p.id)+'">'+U.escHtml(p.label)+'</button>';
-    });
-    tabsEl.innerHTML = tabsHtml;
-    tabsEl.querySelectorAll(".tab").forEach(function(btn){
-      btn.onclick = function(){ selectedProvider=btn.dataset.provider; render(); };
-    });
-
-    // Active strip
+  function renderActiveStrip(){
     var activeEl = document.getElementById("active-strip");
-    var active = (data.active_sessions||[]).filter(function(s){ return selectedProvider==="all"||s.provider===selectedProvider; });
+    var active = (data.active_sessions || []).filter(function(s){
+      return selectedProvider === "all" || s.provider === selectedProvider;
+    });
     activeEl.innerHTML = active.map(function(s){
-      return '<div class="active-card"><span class="pulse-dot"></span><span class="sid">'+U.escHtml(s.display_label)+'</span><span class="proj">'+U.escHtml(s.project_name)+'</span><span class="tokens">'+U.compact(s.total_tokens)+'</span></div>';
+      return '<div class="active-card"><span class="pulse-dot"></span><span class="sid">' + U.escHtml(s.display_label) + '</span><span class="proj">' + U.escHtml(s.project_name) + '</span><span class="tokens">' + compact(s.total_tokens) + '</span></div>';
     }).join("");
+  }
 
-    // Filter + sort + mark inactive
-    var sessions = (data.sessions||[]).filter(function(s){
-      if(selectedProvider!=="all" && s.provider!==selectedProvider) return false;
-      if(!searchText) return true;
-      var q=searchText.toLowerCase();
-      return [s.provider,s.session_id,s.display_label,s.project_name,s.state,s.account_label,s.working_path]
-        .some(function(v){ return v&&String(v).toLowerCase().includes(q); });
+  function rowMatchesSearch(values){
+    if(!searchText) return true;
+    var q = searchText.toLowerCase();
+    return values.some(function(v){
+      return v && String(v).toLowerCase().includes(q);
+    });
+  }
+
+  function isInactive(s){
+    var ts = s.last_activity_at || 0;
+    return ts > 0 && (Date.now() / 1000 - ts) > getInactivityDays() * 86400;
+  }
+
+  function sessionsForView(){
+    return (data.sessions || []).filter(function(s){
+      if(selectedProvider !== "all" && s.provider !== selectedProvider) return false;
+      return rowMatchesSearch([s.provider, s.session_id, s.display_label, s.project_name, s.state, s.account_label, s.working_path]);
     }).map(function(s){
       s = Object.assign({}, s);
-      if(isInactive(s) && s.state_category==="idle"){
-        s._inactive = true; s._orig_state = s.state; s.state = "inactive";
+      if(isInactive(s) && s.state_category === "idle"){
+        s._inactive = true;
+        s._orig_state = s.state;
+        s.state = "inactive";
       }
       return s;
     });
+  }
 
-    sessions = U.sortSessions(sessions, sortKey, sortDir);
-
-    // Table body
+  function renderSessionsView(){
+    var sessions = U.sortSessions(sessionsForView(), sortKey, sortDir);
     var tbody = document.getElementById("table-body");
     if(!sessions.length){
       tbody.innerHTML = '<tr><td colspan="9" class="empty">No sessions found</td></tr>';
-    }else{
+    } else {
       tbody.innerHTML = sessions.map(function(s){
-        var sel = s.session_id===selectedSessionId?"selected":"";
+        var sel = s.session_id === selectedSessionId ? "selected" : "";
         var inact = s._inactive ? " inactive-row" : "";
-        return '<tr class="'+sel+inact+'" data-sid="'+U.escHtml(s.session_id)+'">'+
-          '<td><span class="provider-badge '+U.escHtml(s.provider)+'">'+U.escHtml(s.provider)+'</span></td>'+
-          '<td>'+U.escHtml(s.display_label)+'</td>'+
-          '<td>'+U.escHtml(s.project_name)+'</td>'+
-          '<td><span class="state '+U.stateClass(s)+'">'+U.escHtml(U.stateLabel(s))+'</span></td>'+
-          '<td>'+U.relTime(s.last_activity_at)+'</td>'+
-          '<td>'+U.compact(s.total_tokens)+'</td>'+
-          '<td>'+U.compact(s.user_messages+s.assistant_messages)+'</td>'+
-          '<td>'+U.compact(s.tool_uses)+'</td>'+
-          '<td>'+
-            (s.resume_command?'<button class="cmd-copy" data-cmd="'+U.escHtml(s.resume_command)+'">cp</button>':'')+
-            ' <button class="delete-btn" data-sid="'+U.escHtml(s.session_id)+'">&times;</button>'+
+        return '<tr class="' + sel + inact + '" data-sid="' + U.escHtml(s.session_id) + '">' +
+          '<td><span class="provider-badge ' + U.escHtml(s.provider) + '">' + U.escHtml(s.provider) + '</span></td>' +
+          '<td>' + U.escHtml(s.display_label) + '</td>' +
+          '<td>' + U.escHtml(s.project_name) + '</td>' +
+          '<td><span class="state ' + U.stateClass(s) + '">' + U.escHtml(U.stateLabel(s)) + '</span></td>' +
+          '<td>' + U.relTime(s.last_activity_at) + '</td>' +
+          '<td>' + compact(s.total_tokens) + '</td>' +
+          '<td>' + compact((s.user_messages || 0) + (s.assistant_messages || 0)) + '</td>' +
+          '<td>' + compact(s.tool_uses) + '</td>' +
+          '<td>' +
+            (s.resume_command ? '<button class="cmd-copy" data-cmd="' + U.escHtml(s.resume_command) + '">cp</button>' : '') +
+            ' <button class="delete-btn" data-sid="' + U.escHtml(s.session_id) + '">&times;</button>' +
           '</td></tr>';
       }).join("");
     }
 
-    // Row click -> detail
     tbody.querySelectorAll("tr[data-sid]").forEach(function(row){
       row.onclick = function(e){
-        if(e.target.classList.contains("cmd-copy")||e.target.classList.contains("delete-btn")) return;
-        selectedSessionId = selectedSessionId===row.dataset.sid?null:row.dataset.sid;
-        renderDetail(sessions);
-        tbody.querySelectorAll("tr").forEach(function(r){r.classList.toggle("selected",r.dataset.sid===selectedSessionId);});
+        if(e.target.classList.contains("cmd-copy") || e.target.classList.contains("delete-btn")) return;
+        selectedSessionId = selectedSessionId === row.dataset.sid ? null : row.dataset.sid;
+        renderDetail();
+        tbody.querySelectorAll("tr").forEach(function(r){
+          r.classList.toggle("selected", r.dataset.sid === selectedSessionId);
+        });
       };
     });
-    tbody.querySelectorAll(".cmd-copy").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.copyText(btn.dataset.cmd,btn);};});
-    tbody.querySelectorAll(".delete-btn").forEach(function(btn){btn.onclick=function(e){e.stopPropagation();U.deleteSession("/api/sessions",btn.dataset.sid,function(){fetchData();});};});
+    tbody.querySelectorAll(".cmd-copy").forEach(function(btn){
+      btn.onclick = function(e){ e.stopPropagation(); U.copyText(btn.dataset.cmd, btn); };
+    });
+    tbody.querySelectorAll(".delete-btn").forEach(function(btn){
+      btn.onclick = function(e){
+        e.stopPropagation();
+        U.deleteSession("/api/sessions", btn.dataset.sid, function(){ refreshCurrentView(); });
+      };
+    });
 
-    // Bulk delete
     var inactiveCount = sessions.filter(function(s){ return s._inactive; }).length;
     var days = getInactivityDays();
     var bulkBtn = document.getElementById("bulk-delete");
-    bulkBtn.textContent = "Delete "+inactiveCount+" inactive";
+    bulkBtn.textContent = "Delete " + inactiveCount + " inactive";
     if(inactiveCount > 0){
       bulkBtn.disabled = false;
       bulkBtn.style.opacity = "";
-      bulkBtn.onclick = function(){U.deleteInactive("/api/sessions/inactive",inactiveCount,days,function(){fetchData();});};
+      bulkBtn.onclick = function(){ U.deleteInactive("/api/sessions/inactive", inactiveCount, days, function(){ refreshCurrentView(); }); };
     } else {
       bulkBtn.disabled = true;
       bulkBtn.style.opacity = "0.4";
       bulkBtn.onclick = null;
     }
 
-    renderDetail(sessions);
+    renderDetail();
     U.initColumnResize(document.getElementById("sessions-table"));
   }
 
-  function renderDetail(sessions){
-    var panel = document.getElementById("detail-panel");
-    if(!selectedSessionId){ panel.classList.add("closed"); return; }
-    var s = (sessions||(data.sessions||[])).find(function(x){ return x.session_id===selectedSessionId; });
-    if(!s){ panel.classList.add("closed"); return; }
-    panel.classList.remove("closed");
-    var fields = [
-      ["Provider",s.provider],["Session ID",s.session_id],["Project",s.project_name],
-      ["Working Path",s.working_path],["Account",s.account_label],
-      ["State",(s._orig_state||s.state)+(s._inactive?" (inactive)":"")+" ("+s.state_category+")"],
-      ["First Activity",U.formatStamp(s.first_activity_at)],["Last Activity",U.formatStamp(s.last_activity_at)],
-      ["Duration",(s.duration_seconds?Math.round(s.duration_seconds/60)+"m":"\u2014")],
-      ["Input",U.compact(s.input_tokens)],["Output",U.compact(s.output_tokens)],["Total",U.compact(s.total_tokens)],
-      ["User Msgs",String(s.user_messages)],["Asst Msgs",String(s.assistant_messages)],["Tools",String(s.tool_uses)],
-      ["Last Prompt",s.last_prompt||"\u2014"],["Last Error",s.last_error||"\u2014"],
-    ];
-    var html = '<div class="detail-grid">';
-    fields.forEach(function(f){html += '<div class="detail-field"><div class="dlabel">'+U.escHtml(f[0])+'</div><div class="dvalue">'+U.escHtml(String(f[1]||"\u2014"))+'</div></div>';});
-    if(s.resume_command) html += '<div class="detail-field" style="grid-column:1/-1"><div class="dlabel">Resume Command</div><div class="dvalue mono">'+U.escHtml(s.resume_command)+' <button class="cmd-copy" onclick="DashUtils.copyText(\''+U.escHtml(s.resume_command.replace(/'/g,"\\'"))+'\',this)">copy</button></div></div>';
-    html += '</div>';
-    panel.innerHTML = html;
+  function syncUsageState(){
+    if(!usageData) return;
+    var seriesState = {};
+    (usageData.series_options || []).forEach(function(option){
+      if(Object.prototype.hasOwnProperty.call(usageState.series, option.key)){
+        seriesState[option.key] = usageState.series[option.key];
+      } else {
+        seriesState[option.key] = !!option.default;
+      }
+    });
+    usageState.series = seriesState;
+
+    var buckets = usageData.buckets || [];
+    if(!buckets.length){
+      usageState.selectedBucketStart = null;
+      usageState.zoomStart = 0;
+      usageState.zoomEnd = -1;
+      return;
+    }
+    if(usageState.zoomEnd < 0 || usageState.zoomEnd >= buckets.length){
+      var span = usageBucketCountDefault(usageState.bucket);
+      usageState.zoomEnd = buckets.length - 1;
+      usageState.zoomStart = Math.max(0, usageState.zoomEnd - span + 1);
+    }
+    var exists = buckets.some(function(bucket){ return bucket.bucket_start === usageState.selectedBucketStart; });
+    if(!exists){
+      usageState.selectedBucketStart = buckets[buckets.length - 1].bucket_start;
+    }
+    if(
+      usageState.rangeStart != null &&
+      !buckets.some(function(bucket){ return bucket.bucket_start === usageState.rangeStart; })
+    ){
+      clearUsageSelection();
+    }
+    if(
+      usageState.rangeEnd != null &&
+      !buckets.some(function(bucket){ return bucket.bucket_start === usageState.rangeEnd; })
+    ){
+      clearUsageSelection();
+    }
+    if(usageState.preset === "custom"){
+      document.getElementById("usage-start").value = toLocalInputValue(usageData.window.start);
+      document.getElementById("usage-end").value = toLocalInputValue(usageData.window.end);
+    }
   }
 
-  // ── Sort headers ──
+  function usageBucketsVisible(){
+    if(!usageData || !(usageData.buckets || []).length) return [];
+    var buckets = usageData.buckets;
+    var start = Math.max(0, usageState.zoomStart || 0);
+    var end = usageState.zoomEnd < 0 ? buckets.length - 1 : Math.min(buckets.length - 1, usageState.zoomEnd);
+    return buckets.slice(start, end + 1);
+  }
+
+  function clearUsageRangeBreakdown(){
+    usageRangeData = null;
+    usageRangeRequestKey = "";
+    usageRangeLoading = false;
+  }
+
+  function clearUsageSelection(){
+    usageState.rangeStart = null;
+    usageState.rangeEnd = null;
+    clearUsageRangeBreakdown();
+  }
+
+  function usageSelectionBuckets(){
+    if(!usageData || usageState.rangeStart == null || usageState.rangeEnd == null) return [];
+    var buckets = usageData.buckets || [];
+    var startIdx = buckets.findIndex(function(bucket){ return bucket.bucket_start === usageState.rangeStart; });
+    var endIdx = buckets.findIndex(function(bucket){ return bucket.bucket_start === usageState.rangeEnd; });
+    if(startIdx < 0 || endIdx < 0) return [];
+    var lo = Math.min(startIdx, endIdx);
+    var hi = Math.max(startIdx, endIdx);
+    return buckets.slice(lo, hi + 1);
+  }
+
+  function usageSelectionVisibleIndices(visible){
+    if(usageState.rangeStart == null || usageState.rangeEnd == null) return null;
+    var startIdx = visible.findIndex(function(bucket){ return bucket.bucket_start === usageState.rangeStart; });
+    var endIdx = visible.findIndex(function(bucket){ return bucket.bucket_start === usageState.rangeEnd; });
+    if(startIdx < 0 || endIdx < 0) return null;
+    return {start: Math.min(startIdx, endIdx), end: Math.max(startIdx, endIdx)};
+  }
+
+  function summarizeUsageBuckets(buckets){
+    var summary = {
+      bucketCount: buckets.length,
+      markerCount: 0,
+      claudeLimitHits: 0,
+      fiveHourMaxUsedPercent: null,
+      sevenDayMaxUsedPercent: null,
+      series: {
+        total_tokens: 0,
+        input_tokens: 0,
+        cached_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0
+      }
+    };
+    buckets.forEach(function(bucket){
+      var series = bucket.series || {};
+      Object.keys(summary.series).forEach(function(key){
+        summary.series[key] += Number(series[key] || 0);
+      });
+      summary.markerCount += Number(bucket.marker_count || 0);
+      var limitSummary = bucket.limit_summary || {};
+      if(limitSummary.five_hour_max_used_percent != null){
+        summary.fiveHourMaxUsedPercent = summary.fiveHourMaxUsedPercent == null
+          ? Number(limitSummary.five_hour_max_used_percent)
+          : Math.max(summary.fiveHourMaxUsedPercent, Number(limitSummary.five_hour_max_used_percent));
+      }
+      if(limitSummary.seven_day_max_used_percent != null){
+        summary.sevenDayMaxUsedPercent = summary.sevenDayMaxUsedPercent == null
+          ? Number(limitSummary.seven_day_max_used_percent)
+          : Math.max(summary.sevenDayMaxUsedPercent, Number(limitSummary.seven_day_max_used_percent));
+      }
+      summary.claudeLimitHits += Number(limitSummary.claude_limit_hits || 0);
+    });
+    if(buckets.length){
+      summary.first = buckets[0];
+      summary.last = buckets[buckets.length - 1];
+      summary.start = buckets[0].bucket_start;
+      summary.end = buckets[buckets.length - 1].bucket_end;
+      summary.label = buckets[0].label === buckets[buckets.length - 1].label
+        ? buckets[0].label
+        : buckets[0].label + " \u2192 " + buckets[buckets.length - 1].label;
+      summary.durationSeconds = Math.max(0, Number(summary.end || 0) - Number(summary.start || 0));
+    }
+    return summary;
+  }
+
+  function currentUsageRangeRequestKey(){
+    var buckets = usageSelectionBuckets();
+    if(!buckets.length) return "";
+    var first = buckets[0];
+    var last = buckets[buckets.length - 1];
+    return [selectedProvider, first.bucket_start, last.bucket_end].join("|");
+  }
+
+  async function fetchUsageRangeBreakdown(){
+    var buckets = usageSelectionBuckets();
+    if(!buckets.length){
+      clearUsageRangeBreakdown();
+      renderUsageBreakdown();
+      renderUsageDetail();
+      return;
+    }
+    var first = buckets[0];
+    var last = buckets[buckets.length - 1];
+    var requestKey = currentUsageRangeRequestKey();
+    if(usageRangeData && usageRangeRequestKey === requestKey){
+      return;
+    }
+    usageRangeData = null;
+    usageRangeRequestKey = requestKey;
+    usageRangeLoading = true;
+    renderUsageBreakdown();
+    renderUsageDetail();
+
+    var params = new URLSearchParams();
+    params.set("provider", selectedProvider);
+    params.set("start_ts", String(first.bucket_start));
+    params.set("end_ts", String(last.bucket_end));
+
+    try{
+      var resp = await fetch("/api/usage-breakdown?" + params.toString());
+      if(!resp.ok) throw new Error("HTTP " + resp.status);
+      var payload = await resp.json();
+      if(usageRangeRequestKey !== requestKey){
+        return;
+      }
+      usageRangeData = payload;
+      usageRangeLoading = false;
+      renderUsageBreakdown();
+      renderUsageDetail();
+    }catch(err){
+      if(usageRangeRequestKey !== requestKey){
+        return;
+      }
+      usageRangeLoading = false;
+      setErrorBanner(String(err));
+      renderUsageBreakdown();
+      renderUsageDetail();
+    }
+  }
+
+  function currentUsageBucket(){
+    return (usageData && usageData.buckets || []).find(function(bucket){
+      return bucket.bucket_start === usageState.selectedBucketStart;
+    }) || null;
+  }
+
+  function enabledSeriesKeys(){
+    return Object.keys(usageState.series).filter(function(key){ return usageState.series[key]; });
+  }
+
+  function renderUsageSummary(){
+    if(!usageData){
+      document.getElementById("usage-summary").innerHTML = "";
+      return;
+    }
+    var totals = usageData.totals || {};
+    var summary = [
+      {label:"Total", value: compact(totals.total_tokens), sub:"all enabled events"},
+      {label:"Input", value: compact(totals.input_tokens), sub:"direct input"},
+      {label:"Cached", value: compact(totals.cached_tokens), sub:"cache read + create / cached input"},
+      {label:"Output", value: compact(totals.output_tokens), sub:"assistant output"},
+      {label:"Reasoning", value: compact(totals.reasoning_output_tokens), sub:"Codex only"},
+      {label:"Limit Events", value: compact(usageData.limit_event_count), sub:"provider limit snapshots"}
+    ];
+    document.getElementById("usage-summary").innerHTML = summary.map(function(card){
+      return '<div class="usage-stat"><div class="usage-stat-label">' + U.escHtml(card.label) + '</div><div class="usage-stat-value">' + U.escHtml(String(card.value)) + '</div><div class="usage-stat-sub">' + U.escHtml(card.sub) + '</div></div>';
+    }).join("");
+  }
+
+  function renderUsageSelectionSummary(){
+    var wrap = document.getElementById("usage-selection-summary");
+    var buckets = usageSelectionBuckets();
+    if(!buckets.length){
+      wrap.classList.add("hidden");
+      wrap.innerHTML = "";
+      return;
+    }
+    var summary = summarizeUsageBuckets(buckets);
+    wrap.classList.remove("hidden");
+    wrap.innerHTML =
+      '<span class="sel-label">Range</span><span class="sel-value">' + U.escHtml(summary.label || "\u2014") + '</span>' +
+      '<span class="sel-label">Duration</span><span class="sel-value">' + U.escHtml(formatDuration(summary.durationSeconds)) + '</span>' +
+      '<span class="sel-label">Buckets</span><span class="sel-value">' + compact(summary.bucketCount) + '</span>' +
+      '<span class="sel-label">Total</span><span class="sel-value">' + compact(summary.series.total_tokens) + '</span>' +
+      '<span class="sel-label">Input</span><span class="sel-value">' + compact(summary.series.input_tokens) + '</span>' +
+      '<span class="sel-label">Cached</span><span class="sel-value">' + compact(summary.series.cached_tokens) + '</span>' +
+      '<span class="sel-label">Output</span><span class="sel-value">' + compact(summary.series.output_tokens) + '</span>' +
+      '<button class="sel-clear" type="button">Clear range</button>';
+    wrap.querySelector(".sel-clear").onclick = function(){
+      clearUsageSelection();
+      renderUsageView();
+    };
+  }
+
+  function renderSeriesToggles(){
+    var wrap = document.getElementById("usage-series");
+    if(!usageData){
+      wrap.innerHTML = "";
+      return;
+    }
+    wrap.innerHTML = (usageData.series_options || []).map(function(option){
+      var active = usageState.series[option.key] ? "active" : "";
+      return '<button class="series-pill ' + active + '" data-series="' + U.escHtml(option.key) + '" style="--series-color:' + U.escHtml(option.color) + '">' +
+        '<span class="legend-swatch" style="background:' + U.escHtml(option.color) + '"></span>' +
+        U.escHtml(option.label) +
+      '</button>';
+    }).join("");
+    wrap.querySelectorAll("[data-series]").forEach(function(btn){
+      btn.onclick = function(){
+        usageState.series[btn.dataset.series] = !usageState.series[btn.dataset.series];
+        renderUsageView();
+      };
+    });
+  }
+
+  function renderUsageChart(){
+    var svg = document.getElementById("usage-chart-svg");
+    var meta = document.getElementById("usage-meta");
+    var zoomRange = document.getElementById("usage-zoom-range");
+    if(!usageData || !(usageData.buckets || []).length){
+      svg.innerHTML = "";
+      meta.textContent = "No token usage found in the selected scope.";
+      zoomRange.textContent = "No buckets";
+      document.getElementById("usage-breakdown-title").textContent = "Breakdown";
+      document.getElementById("usage-zoom").innerHTML = "";
+      document.getElementById("usage-selection-summary").classList.add("hidden");
+      hideUsageTooltip();
+      return;
+    }
+
+    var visible = usageBucketsVisible();
+    var enabled = enabledSeriesKeys();
+    if(!enabled.length){
+      enabled = ["total_tokens"];
+      usageState.series.total_tokens = true;
+    }
+    var bucketCount = visible.length;
+    var width = Math.max(960, bucketCount * 34);
+    var height = 360;
+    var margin = {left:56, right:24, top:26, bottom:58};
+    var innerWidth = width - margin.left - margin.right;
+    var innerHeight = height - margin.top - margin.bottom;
+    var seriesMetaByKey = {};
+    (usageData.series_options || []).forEach(function(option){
+      seriesMetaByKey[option.key] = option;
+    });
+    var maxValue = Math.max(1, Math.max.apply(null, visible.map(function(bucket){
+      return Math.max.apply(null, enabled.map(function(key){ return Number((bucket.series || {})[key] || 0); }));
+    })));
+    var gridValues = [0, 0.25, 0.5, 0.75, 1].map(function(scale){ return maxValue * scale; });
+    var domainStart = Number(visible[0].bucket_start || 0);
+    var domainEnd = Math.max(domainStart + 1, Number(visible[visible.length - 1].bucket_end || visible[visible.length - 1].bucket_start || domainStart + 1));
+
+    function bucketMid(bucket){
+      var start = Number(bucket.bucket_start || 0);
+      var end = Number(bucket.bucket_end || bucket.bucket_start || start);
+      return start + (end - start) / 2;
+    }
+
+    function xForTs(ts){
+      if(domainEnd <= domainStart){
+        return margin.left + innerWidth / 2;
+      }
+      return margin.left + ((Number(ts || 0) - domainStart) / (domainEnd - domainStart)) * innerWidth;
+    }
+
+    function xFor(index){
+      return xForTs(bucketMid(visible[index]));
+    }
+
+    function spanFor(index){
+      var bucket = visible[index];
+      var left = xForTs(bucket.bucket_start);
+      var right = xForTs(bucket.bucket_end);
+      return {x: left, width: Math.max(8, right - left)};
+    }
+
+    function yFor(value){
+      return margin.top + innerHeight - (Math.max(0, Number(value || 0)) / maxValue) * innerHeight;
+    }
+
+    function plotLocalCoords(event){
+      var rect = svg.getBoundingClientRect();
+      var scaleX = rect.width / Math.max(1, width);
+      var scaleY = rect.height / Math.max(1, height);
+      return {
+        x: (event.clientX - rect.left) / scaleX,
+        y: (event.clientY - rect.top) / scaleY
+      };
+    }
+
+    function insidePlot(local){
+      return local.x >= margin.left &&
+        local.x <= margin.left + innerWidth &&
+        local.y >= margin.top &&
+        local.y <= margin.top + innerHeight;
+    }
+
+    function indexFromLocalX(localX){
+      if(bucketCount <= 1){
+        return 0;
+      }
+      var ratio = Math.max(0, Math.min(1, (localX - margin.left) / Math.max(1, innerWidth)));
+      var ts = domainStart + ratio * (domainEnd - domainStart);
+      for(var i = 0; i < visible.length; i += 1){
+        var bucket = visible[i];
+        if(ts >= Number(bucket.bucket_start || 0) && ts < Number(bucket.bucket_end || bucket.bucket_start || 0)){
+          return i;
+        }
+      }
+      if(ts >= domainEnd){
+        return visible.length - 1;
+      }
+      var bestIndex = 0;
+      var bestDistance = Infinity;
+      visible.forEach(function(bucket, index){
+        var distance = Math.abs(bucketMid(bucket) - ts);
+        if(distance < bestDistance){
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+      return bestIndex;
+    }
+
+    function bucketTooltipHtml(bucket){
+      var rows = [{label:"Bucket", value: bucket.label}];
+      enabled.forEach(function(key){
+        var option = seriesMetaByKey[key] || {label:key};
+        rows.push({label: option.label, value: formatTokenCount((bucket.series || {})[key])});
+      });
+      if((bucket.marker_count || 0) > 0){
+        rows.push({label:"Markers", value: String(bucket.marker_count || 0)});
+      }
+      return usageTooltipHtml("Usage Sample", rows);
+    }
+
+    function pointTooltipHtml(bucket, key){
+      var option = seriesMetaByKey[key] || {label:key};
+      return usageTooltipHtml(option.label || key, [
+        {label:"Bucket", value: bucket.label},
+        {label:"Tokens", value: formatTokenCount((bucket.series || {})[key])},
+        {label:"Total", value: formatTokenCount((bucket.series || {}).total_tokens)}
+      ]);
+    }
+
+    function markerTooltipHtml(marker, bucket){
+      var rows = [{label:"Bucket", value: bucket.label}];
+      if(marker.window){
+        rows.push({label:"Window", value: marker.window});
+      }
+      if(marker.used_percent != null){
+        rows.push({label:"Used", value: formatPercent(marker.used_percent)});
+      }
+      if(marker.resets_at){
+        rows.push({label:"Resets", value: formatUsageTs(marker.resets_at, usageState.bucket)});
+      }
+      if(marker.project_name){
+        rows.push({label:"Project", value: marker.project_name});
+      }
+      if(marker.session_label){
+        rows.push({label:"Session", value: marker.session_label});
+      }
+      return usageTooltipHtml(marker.label || marker.kind, rows);
+    }
+
+    var dayBands = [];
+    var dayBoundaries = [];
+    if(["5m", "15m", "hour"].indexOf(usageState.bucket) >= 0){
+      var groupStart = 0;
+      var activeDay = "";
+      visible.forEach(function(bucket, index){
+        var stamp = new Date(bucket.bucket_start * 1000);
+        var dayKey = stamp.getFullYear() + "-" + (stamp.getMonth() + 1) + "-" + stamp.getDate();
+        if(!activeDay){
+          activeDay = dayKey;
+          return;
+        }
+        if(dayKey !== activeDay){
+          dayBands.push({start: groupStart, end: index - 1});
+          dayBoundaries.push(index);
+          groupStart = index;
+          activeDay = dayKey;
+        }
+      });
+      dayBands.push({start: groupStart, end: bucketCount - 1});
+    }
+    var dayBandSvg = dayBands.map(function(group, groupIndex){
+      var firstSpan = spanFor(group.start);
+      var lastSpan = spanFor(group.end);
+      var bandWidth = lastSpan.x + lastSpan.width - firstSpan.x;
+      return '<rect class="usage-day-band' + (groupIndex % 2 ? ' alt' : '') + '" x="' + firstSpan.x.toFixed(1) + '" y="' + margin.top + '" width="' + bandWidth.toFixed(1) + '" height="' + innerHeight + '"></rect>';
+    }).join("");
+    var dayBoundarySvg = dayBoundaries.map(function(index){
+      var span = spanFor(index);
+      return '<line x1="' + span.x.toFixed(1) + '" y1="' + margin.top + '" x2="' + span.x.toFixed(1) + '" y2="' + (margin.top + innerHeight) + '" class="usage-day-boundary"></line>';
+    }).join("");
+
+    var paths = enabled.map(function(key){
+      var metaEntry = seriesMetaByKey[key] || {};
+      var points = visible.map(function(bucket, index){
+        return xFor(index).toFixed(1) + "," + yFor((bucket.series || {})[key]).toFixed(1);
+      }).join(" ");
+      return '<polyline class="usage-line" points="' + points + '" stroke="' + U.escHtml(metaEntry.color || "#62a7ff") + '"></polyline>' +
+        visible.map(function(bucket, index){
+          var y = yFor((bucket.series || {})[key]);
+          return '<circle class="usage-point" data-index="' + index + '" data-series-key="' + U.escHtml(key) + '" cx="' + xFor(index).toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="' + U.escHtml(metaEntry.color || "#62a7ff") + '"></circle>';
+        }).join("");
+    }).join("");
+
+    var selectedIndex = visible.findIndex(function(bucket){ return bucket.bucket_start === usageState.selectedBucketStart; });
+    var selectedRange = usageSelectionVisibleIndices(visible);
+    var markers = [];
+    visible.forEach(function(bucket, index){
+      if(!(bucket.markers || []).length) return;
+      (bucket.markers || []).forEach(function(marker, markerIndex){
+        var x = xFor(index);
+        var y = margin.top + 10 + markerIndex * 14;
+        var color = marker.severity === "good" ? "#37c7a7" : (marker.kind === "claude_rate_limit" ? "#ffb347" : "#ff5555");
+        markers.push('<circle class="usage-marker" data-index="' + index + '" data-marker-index="' + markerIndex + '" cx="' + x.toFixed(1) + '" cy="' + y + '" r="4.5" fill="' + color + '"></circle>');
+      });
+    });
+
+    var labelStep = Math.max(1, Math.ceil(bucketCount / 8));
+    var labels = visible.map(function(bucket, index){
+      if(index % labelStep !== 0 && index !== bucketCount - 1) return "";
+      return '<text x="' + xFor(index).toFixed(1) + '" y="' + (height - 20) + '" fill="#6b7a8d" font-size="10" text-anchor="middle">' + U.escHtml(bucket.label) + '</text>';
+    }).join("");
+
+    var hitRects = visible.map(function(bucket, index){
+      var span = spanFor(index);
+      return '<rect class="usage-hit ' + (bucket.bucket_start === usageState.selectedBucketStart ? 'active' : '') + '" data-index="' + index + '" data-bucket-start="' + bucket.bucket_start + '" x="' + span.x.toFixed(1) + '" y="' + margin.top + '" width="' + span.width.toFixed(1) + '" height="' + innerHeight + '"></rect>';
+    }).join("");
+
+    var grid = gridValues.map(function(value){
+      var y = yFor(value);
+      return '<line x1="' + margin.left + '" y1="' + y.toFixed(1) + '" x2="' + (margin.left + innerWidth) + '" y2="' + y.toFixed(1) + '" class="usage-grid"></line>' +
+        '<text x="' + (margin.left - 8) + '" y="' + (y + 4).toFixed(1) + '" fill="#6b7a8d" font-size="10" text-anchor="end">' + U.escHtml(compact(Math.round(value))) + '</text>';
+    }).join("");
+
+    var selection = selectedIndex >= 0 ? (function(){
+      var x = xFor(selectedIndex);
+      return '<line x1="' + x.toFixed(1) + '" y1="' + margin.top + '" x2="' + x.toFixed(1) + '" y2="' + (margin.top + innerHeight) + '" class="usage-selection"></line>';
+    })() : "";
+    var rangeBand = (function(){
+      if(!selectedRange) return '<rect id="usage-range-band" class="usage-range-band" x="' + margin.left + '" y="' + margin.top + '" width="0" height="' + innerHeight + '" style="display:none"></rect>';
+      var firstSpan = spanFor(selectedRange.start);
+      var lastSpan = spanFor(selectedRange.end);
+      return '<rect id="usage-range-band" class="usage-range-band" x="' + firstSpan.x.toFixed(1) + '" y="' + margin.top + '" width="' + (lastSpan.x + lastSpan.width - firstSpan.x).toFixed(1) + '" height="' + innerHeight + '"></rect>';
+    })();
+
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    svg.innerHTML =
+      '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="transparent"></rect>' +
+      dayBandSvg +
+      grid +
+      '<line x1="' + margin.left + '" y1="' + (margin.top + innerHeight) + '" x2="' + (margin.left + innerWidth) + '" y2="' + (margin.top + innerHeight) + '" class="usage-axis"></line>' +
+      '<line x1="' + margin.left + '" y1="' + margin.top + '" x2="' + margin.left + '" y2="' + (margin.top + innerHeight) + '" class="usage-axis"></line>' +
+      dayBoundarySvg +
+      hitRects +
+      rangeBand +
+      selection +
+      paths +
+      markers.join("") +
+      labels;
+
+    var hitNodes = Array.from(svg.querySelectorAll("[data-bucket-start]"));
+    if(selectedRange){
+      hitNodes.forEach(function(node, index){
+        node.classList.toggle("range-active", index >= selectedRange.start && index <= selectedRange.end);
+      });
+    }
+
+    function updateRangePreview(startIndex, endIndex){
+      var lo = Math.min(startIndex, endIndex);
+      var hi = Math.max(startIndex, endIndex);
+      var band = svg.querySelector("#usage-range-band");
+      var firstSpan = spanFor(lo);
+      var lastSpan = spanFor(hi);
+      if(band){
+        band.style.display = "";
+        band.setAttribute("x", firstSpan.x.toFixed(1));
+        band.setAttribute("width", (lastSpan.x + lastSpan.width - firstSpan.x).toFixed(1));
+      }
+      hitNodes.forEach(function(node, index){
+        node.classList.toggle("range-active", index >= lo && index <= hi);
+      });
+    }
+
+    function restorePersistedRange(){
+      var activeRange = usageSelectionVisibleIndices(visible);
+      if(!activeRange){
+        var band = svg.querySelector("#usage-range-band");
+        if(band){
+          band.style.display = "none";
+          band.setAttribute("width", "0");
+        }
+        hitNodes.forEach(function(node){ node.classList.remove("range-active"); });
+        return;
+      }
+      updateRangePreview(activeRange.start, activeRange.end);
+    }
+
+    var dragState = null;
+    svg.onpointerdown = function(event){
+      var local = plotLocalCoords(event);
+      if(!insidePlot(local)) return;
+      var index = indexFromLocalX(local.x);
+      dragState = {pointerId: event.pointerId, start: index, current: index, moved: false};
+      svg.setPointerCapture(event.pointerId);
+      updateRangePreview(index, index);
+      hideUsageTooltip();
+      event.preventDefault();
+    };
+    svg.onpointermove = function(event){
+      if(dragState && dragState.pointerId === event.pointerId){
+        var dragLocal = plotLocalCoords(event);
+        var nextIndex = indexFromLocalX(dragLocal.x);
+        if(nextIndex !== dragState.current){
+          dragState.current = nextIndex;
+          dragState.moved = true;
+          updateRangePreview(dragState.start, dragState.current);
+        }
+        hideUsageTooltip();
+        return;
+      }
+      if(event.target.closest(".usage-point") || event.target.closest(".usage-marker")){
+        return;
+      }
+      var local = plotLocalCoords(event);
+      if(!insidePlot(local)){
+        hideUsageTooltip();
+        return;
+      }
+      showUsageTooltip(event, bucketTooltipHtml(visible[indexFromLocalX(local.x)]));
+    };
+    function finishDrag(event, cancelled){
+      if(!dragState || dragState.pointerId !== event.pointerId) return;
+      var finalState = dragState;
+      dragState = null;
+      try{ svg.releasePointerCapture(event.pointerId); }catch(err){}
+      hideUsageTooltip();
+      if(cancelled){
+        restorePersistedRange();
+        return;
+      }
+      if(finalState.moved){
+        var lo = Math.min(finalState.start, finalState.current);
+        var hi = Math.max(finalState.start, finalState.current);
+        usageState.rangeStart = visible[lo].bucket_start;
+        usageState.rangeEnd = visible[hi].bucket_start;
+        usageState.selectedBucketStart = visible[hi].bucket_start;
+        clearUsageRangeBreakdown();
+      } else {
+        clearUsageSelection();
+        usageState.selectedBucketStart = visible[finalState.start].bucket_start;
+      }
+      renderUsageView();
+      if(finalState.moved){
+        fetchUsageRangeBreakdown();
+      }
+    }
+    svg.onpointerup = function(event){ finishDrag(event, false); };
+    svg.onpointercancel = function(event){ finishDrag(event, true); };
+    svg.onpointerleave = function(){
+      if(!dragState){
+        hideUsageTooltip();
+      }
+    };
+    svg.onlostpointercapture = function(){
+      if(dragState){
+        dragState = null;
+        restorePersistedRange();
+      }
+    };
+
+    svg.querySelectorAll(".usage-point").forEach(function(node){
+      node.addEventListener("pointerenter", function(event){
+        var bucket = visible[Number(node.dataset.index || 0)];
+        showUsageTooltip(event, pointTooltipHtml(bucket, node.dataset.seriesKey));
+      });
+      node.addEventListener("pointermove", function(event){
+        var bucket = visible[Number(node.dataset.index || 0)];
+        showUsageTooltip(event, pointTooltipHtml(bucket, node.dataset.seriesKey));
+      });
+      node.addEventListener("pointerleave", function(){
+        hideUsageTooltip();
+      });
+    });
+
+    svg.querySelectorAll(".usage-marker").forEach(function(node){
+      node.addEventListener("pointerenter", function(event){
+        var bucket = visible[Number(node.dataset.index || 0)];
+        var marker = (bucket.markers || [])[Number(node.dataset.markerIndex || 0)] || null;
+        if(marker){
+          showUsageTooltip(event, markerTooltipHtml(marker, bucket));
+        }
+      });
+      node.addEventListener("pointermove", function(event){
+        var bucket = visible[Number(node.dataset.index || 0)];
+        var marker = (bucket.markers || [])[Number(node.dataset.markerIndex || 0)] || null;
+        if(marker){
+          showUsageTooltip(event, markerTooltipHtml(marker, bucket));
+        }
+      });
+      node.addEventListener("pointerleave", function(){
+        hideUsageTooltip();
+      });
+    });
+
+    if(!selectedRange){
+      restorePersistedRange();
+    }
+
+    var first = visible[0];
+    var last = visible[visible.length - 1];
+    zoomRange.textContent = first && last ? first.label + " \u2192 " + last.label : "All buckets";
+    meta.textContent = visible.length + " buckets visible \u2022 " + usageData.event_count + " token events \u2022 " + usageData.limit_event_count + " limit snapshots \u2022 hover for details \u2022 drag to inspect a range";
+
+    var minimapBuckets = (usageData.buckets || []).map(function(bucket){
+      return { total: Number((bucket.series || {}).total_tokens || 0) };
+    });
+    U.renderZoomMinimap(
+      document.getElementById("usage-zoom"),
+      minimapBuckets,
+      usageState.zoomStart,
+      usageState.zoomEnd,
+      function(start, end){
+        usageState.zoomStart = start;
+        usageState.zoomEnd = end;
+        var zoomBuckets = usageData.buckets.slice(start, end + 1);
+        if(!zoomBuckets.some(function(bucket){ return bucket.bucket_start === usageState.selectedBucketStart; })){
+          if(zoomBuckets.length){
+            usageState.selectedBucketStart = zoomBuckets[zoomBuckets.length - 1].bucket_start;
+          }
+        }
+        var rangeBuckets = usageSelectionBuckets();
+        if(rangeBuckets.length){
+          var visibleBucketStarts = zoomBuckets.map(function(bucket){ return bucket.bucket_start; });
+          var rangeVisible = rangeBuckets.every(function(bucket){ return visibleBucketStarts.indexOf(bucket.bucket_start) >= 0; });
+          if(!rangeVisible){
+            clearUsageSelection();
+          }
+        }
+        renderUsageView();
+      }
+    );
+  }
+
+  function renderUsageBreakdown(){
+    var table = document.getElementById("usage-breakdown-table");
+    var title = document.getElementById("usage-breakdown-title");
+    var label = document.getElementById("usage-breakdown-label");
+    var selectionBuckets = usageSelectionBuckets();
+    var selectionSummary = selectionBuckets.length ? summarizeUsageBuckets(selectionBuckets) : null;
+    var bucket = currentUsageBucket();
+    if(selectionSummary){
+      label.textContent = "Selected Range";
+      title.textContent = selectionSummary.label || "Selected Range";
+    } else {
+      label.textContent = "Selected Bucket";
+    }
+    if(!bucket && !selectionSummary){
+      title.textContent = "Breakdown";
+      table.innerHTML = '<tbody><tr><td class="empty">Select a bucket to inspect it.</td></tr></tbody>';
+      return;
+    }
+    if(!selectionSummary){
+      title.textContent = bucket.label;
+    }
+    if(usageState.breakdown === "markers"){
+      var markerSource = selectionBuckets.length
+        ? ((usageRangeData && usageRangeRequestKey === currentUsageRangeRequestKey())
+            ? (usageRangeData.markers || [])
+            : selectionBuckets.reduce(function(acc, row){ return acc.concat(row.markers || []); }, []))
+        : (bucket.markers || []);
+      var markers = markerSource.filter(function(marker){
+        return rowMatchesSearch([marker.kind, marker.label, marker.project_name, marker.session_label]);
+      });
+      var rangeLimitSummary = (usageRangeData && usageRangeData.limit_summary) || {};
+      var limitSummary = selectionSummary ? {
+        five_hour_max_used_percent: usageRangeData ? rangeLimitSummary.five_hour_max_used_percent : selectionSummary.fiveHourMaxUsedPercent,
+        seven_day_max_used_percent: usageRangeData ? rangeLimitSummary.seven_day_max_used_percent : selectionSummary.sevenDayMaxUsedPercent,
+        claude_limit_hits: usageRangeData ? rangeLimitSummary.claude_limit_hits : selectionSummary.claudeLimitHits
+      } : (bucket.limit_summary || {});
+      table.innerHTML = '<thead><tr><th>Marker</th><th>Context</th><th>Detail</th></tr></thead><tbody>' +
+        (markers.map(function(marker){
+          var detail = marker.used_percent != null
+            ? ((marker.window ? marker.window + " \u2022 " : "") + formatPercent(marker.used_percent))
+            : (marker.resets_at ? formatUsageTs(marker.resets_at, "day") : "\u2014");
+          return '<tr><td><strong>' + U.escHtml(marker.label || marker.kind) + '</strong></td><td>' + U.escHtml((marker.project_name || "\u2014") + ' \u2022 ' + (marker.session_label || "\u2014")) + '</td><td>' + U.escHtml(detail) + '</td></tr>';
+        }).join("") || '<tr><td colspan="3" class="empty">No markers matched the current filter.</td></tr>') +
+        '<tr><td><strong>5h Max</strong></td><td>Codex rolling window</td><td>' + U.escHtml(formatPercent(limitSummary.five_hour_max_used_percent)) + '</td></tr>' +
+        '<tr><td><strong>7d Max</strong></td><td>Codex rolling window</td><td>' + U.escHtml(formatPercent(limitSummary.seven_day_max_used_percent)) + '</td></tr>' +
+        '<tr><td><strong>Claude Limit Hits</strong></td><td>Rate-limit errors</td><td>' + U.escHtml(String(limitSummary.claude_limit_hits || 0)) + '</td></tr>' +
+      '</tbody>';
+      return;
+    }
+    if(selectionSummary){
+      if(usageRangeLoading){
+        table.innerHTML = '<tbody><tr><td class="empty">Loading selected range breakdown…</td></tr></tbody>';
+        return;
+      }
+      if(!usageRangeData || usageRangeRequestKey !== currentUsageRangeRequestKey()){
+        table.innerHTML = '<tbody><tr><td class="empty">Range totals are shown above. Drag again or wait a moment for the selected range breakdown to load.</td></tr></tbody>';
+        return;
+      }
+      var rangeRows = usageState.breakdown === "sessions" ? (usageRangeData.session_rows || []) : (usageRangeData.project_rows || []);
+      rangeRows = rangeRows.filter(function(row){
+        return rowMatchesSearch([
+          row.name,
+          row.project_name,
+          row.project_path,
+          row.session_label,
+          row.session_id,
+          row.account_label,
+          row.provider
+        ]);
+      });
+      var rangeHead = usageState.breakdown === "sessions"
+        ? '<thead><tr><th>Session</th><th>Project</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th></tr></thead>'
+        : '<thead><tr><th>Project</th><th>Path</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th></tr></thead>';
+      table.innerHTML = rangeHead + '<tbody>' + (rangeRows.map(function(row){
+        var series = row.series || {};
+        return '<tr>' +
+          '<td><strong>' + U.escHtml(row.session_label || row.name || row.project_name || "\u2014") + '</strong>' +
+            (row.provider ? '<div class="subline">' + U.escHtml(row.provider) + '</div>' : '') +
+          '</td>' +
+          '<td><span class="subline mono">' + U.escHtml(row.project_name || row.project_path || "\u2014") + '</span></td>' +
+          '<td>' + compact(series.input_tokens) + '</td>' +
+          '<td>' + compact(series.cached_tokens) + '</td>' +
+          '<td>' + compact(series.output_tokens) + '</td>' +
+          '<td>' + compact(series.total_tokens) + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="6" class="empty">No rows matched the current filter.</td></tr>') + '</tbody>';
+      return;
+    }
+
+    var rows = usageState.breakdown === "sessions" ? (bucket.top_sessions || []) : (bucket.top_projects || []);
+    rows = rows.filter(function(row){
+      return rowMatchesSearch([
+        row.name,
+        row.project_name,
+        row.project_path,
+        row.session_label,
+        row.session_id,
+        row.account_label
+      ]);
+    });
+    var head = usageState.breakdown === "sessions"
+      ? '<thead><tr><th>Session</th><th>Project</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th></tr></thead>'
+      : '<thead><tr><th>Project</th><th>Path</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th></tr></thead>';
+    table.innerHTML = head + '<tbody>' + (rows.map(function(row){
+      var series = row.series || {};
+      return '<tr>' +
+        '<td><strong>' + U.escHtml(row.session_label || row.name || row.project_name || "\u2014") + '</strong>' +
+          (row.provider ? '<div class="subline">' + U.escHtml(row.provider) + '</div>' : '') +
+        '</td>' +
+        '<td><span class="subline mono">' + U.escHtml(row.project_name || row.project_path || "\u2014") + '</span></td>' +
+        '<td>' + compact(series.input_tokens) + '</td>' +
+        '<td>' + compact(series.cached_tokens) + '</td>' +
+        '<td>' + compact(series.output_tokens) + '</td>' +
+        '<td>' + compact(series.total_tokens) + '</td>' +
+      '</tr>';
+    }).join("") || '<tr><td colspan="6" class="empty">No rows matched the current filter.</td></tr>') + '</tbody>';
+  }
+
+  function renderUsageDetail(){
+    var panel = document.getElementById("detail-panel");
+    var selectionBuckets = usageSelectionBuckets();
+    if(selectionBuckets.length){
+      var rangeSummary = summarizeUsageBuckets(selectionBuckets);
+      var rangeProjects = usageRangeData ? usageRangeData.project_count : null;
+      var rangeSessions = usageRangeData ? usageRangeData.session_count : null;
+      panel.classList.remove("closed");
+      panel.innerHTML =
+        '<div class="detail-grid">' +
+          '<div class="detail-field"><div class="dlabel">Range</div><div class="dvalue">' + U.escHtml(rangeSummary.label || "\u2014") + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Duration</div><div class="dvalue">' + U.escHtml(formatDuration(rangeSummary.durationSeconds)) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Buckets</div><div class="dvalue">' + compact(rangeSummary.bucketCount) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Total Tokens</div><div class="dvalue">' + compact(rangeSummary.series.total_tokens) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Input</div><div class="dvalue">' + compact(rangeSummary.series.input_tokens) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Cached</div><div class="dvalue">' + compact(rangeSummary.series.cached_tokens) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Output</div><div class="dvalue">' + compact(rangeSummary.series.output_tokens) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Reasoning</div><div class="dvalue">' + compact(rangeSummary.series.reasoning_output_tokens) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Projects</div><div class="dvalue">' + U.escHtml(rangeProjects == null ? "\u2014" : compact(rangeProjects)) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Sessions</div><div class="dvalue">' + U.escHtml(rangeSessions == null ? "\u2014" : compact(rangeSessions)) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Markers</div><div class="dvalue">' + compact(rangeSummary.markerCount) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Codex 5h Max</div><div class="dvalue">' + U.escHtml(formatPercent(rangeSummary.fiveHourMaxUsedPercent)) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Codex 7d Max</div><div class="dvalue">' + U.escHtml(formatPercent(rangeSummary.sevenDayMaxUsedPercent)) + '</div></div>' +
+          '<div class="detail-field"><div class="dlabel">Claude Limit Hits</div><div class="dvalue">' + U.escHtml(String(rangeSummary.claudeLimitHits || 0)) + '</div></div>' +
+        '</div>';
+      return;
+    }
+    var bucket = currentUsageBucket();
+    if(!bucket){
+      panel.classList.add("closed");
+      return;
+    }
+    panel.classList.remove("closed");
+    var summary = bucket.limit_summary || {};
+    panel.innerHTML =
+      '<div class="detail-grid">' +
+        '<div class="detail-field"><div class="dlabel">Bucket</div><div class="dvalue">' + U.escHtml(bucket.label) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Total Tokens</div><div class="dvalue">' + compact((bucket.series || {}).total_tokens) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Input</div><div class="dvalue">' + compact((bucket.series || {}).input_tokens) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Cached</div><div class="dvalue">' + compact((bucket.series || {}).cached_tokens) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Output</div><div class="dvalue">' + compact((bucket.series || {}).output_tokens) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Sessions</div><div class="dvalue">' + compact(bucket.session_count) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Projects</div><div class="dvalue">' + compact(bucket.project_count) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Explicit Markers</div><div class="dvalue">' + compact(bucket.marker_count) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Codex 5h Max</div><div class="dvalue">' + U.escHtml(formatPercent(summary.five_hour_max_used_percent)) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Codex 7d Max</div><div class="dvalue">' + U.escHtml(formatPercent(summary.seven_day_max_used_percent)) + '</div></div>' +
+        '<div class="detail-field"><div class="dlabel">Claude Limit Hits</div><div class="dvalue">' + U.escHtml(String(summary.claude_limit_hits || 0)) + '</div></div>' +
+      '</div>';
+  }
+
+  function renderUsageView(){
+    renderUsageSummary();
+    renderSeriesToggles();
+    renderUsageChart();
+    renderUsageSelectionSummary();
+    renderUsageBreakdown();
+    renderUsageDetail();
+  }
+
+  function renderSessionDetail(){
+    var panel = document.getElementById("detail-panel");
+    if(!selectedSessionId){
+      panel.classList.add("closed");
+      return;
+    }
+    var session = sessionsForView().find(function(row){ return row.session_id === selectedSessionId; });
+    if(!session){
+      panel.classList.add("closed");
+      return;
+    }
+    panel.classList.remove("closed");
+    var fields = [
+      ["Provider", session.provider],
+      ["Session ID", session.session_id],
+      ["Project", session.project_name],
+      ["Working Path", session.working_path],
+      ["Account", session.account_label],
+      ["State", (session._orig_state || session.state) + (session._inactive ? " (inactive)" : "") + " (" + session.state_category + ")"],
+      ["First Activity", U.formatStamp(session.first_activity_at)],
+      ["Last Activity", U.formatStamp(session.last_activity_at)],
+      ["Duration", session.duration_seconds ? Math.round(session.duration_seconds / 60) + "m" : "\u2014"],
+      ["Input", compact(session.input_tokens)],
+      ["Output", compact(session.output_tokens)],
+      ["Total", compact(session.total_tokens)],
+      ["User Msgs", String(session.user_messages)],
+      ["Asst Msgs", String(session.assistant_messages)],
+      ["Tools", String(session.tool_uses)],
+      ["Last Prompt", session.last_prompt || "\u2014"],
+      ["Last Error", session.last_error || "\u2014"]
+    ];
+    var html = '<div class="detail-grid">';
+    fields.forEach(function(field){
+      html += '<div class="detail-field"><div class="dlabel">' + U.escHtml(field[0]) + '</div><div class="dvalue">' + U.escHtml(String(field[1] || "\u2014")) + '</div></div>';
+    });
+    if(session.resume_command){
+      html += '<div class="detail-field" style="grid-column:1/-1"><div class="dlabel">Resume Command</div><div class="dvalue mono">' +
+        U.escHtml(session.resume_command) +
+        ' <button class="cmd-copy" data-inline-copy="' + U.escHtml(session.resume_command) + '">copy</button></div></div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    panel.querySelectorAll("[data-inline-copy]").forEach(function(btn){
+      btn.onclick = function(){ U.copyText(btn.dataset.inlineCopy, btn); };
+    });
+  }
+
+  function renderDetail(){
+    if(currentView === "usage"){
+      renderUsageDetail();
+    } else {
+      renderSessionDetail();
+    }
+  }
+
+  function renderCurrentView(){
+    document.getElementById("sessions-view").classList.toggle("hidden", currentView !== "sessions");
+    document.getElementById("usage-view").classList.toggle("hidden", currentView !== "usage");
+    document.getElementById("usage-controls").classList.toggle("hidden", currentView !== "usage");
+    document.getElementById("bulk-delete-slot").style.display = currentView === "sessions" ? "" : "none";
+    document.getElementById("search").placeholder = currentView === "sessions"
+      ? "Filter sessions… (provider, project, state, session id)"
+      : "Filter timeline breakdown… (project, session, marker)";
+    document.querySelectorAll("#workspace-tabs [data-view]").forEach(function(btn){
+      btn.classList.toggle("active", btn.dataset.view === currentView);
+    });
+
+    if(currentView === "usage"){
+      renderUsageView();
+    } else {
+      renderSessionsView();
+    }
+  }
+
   document.getElementById("table-head").querySelectorAll("th[data-key]").forEach(function(th){
     th.onclick = function(){
-      var key=th.dataset.key;
-      if(sortKey===key) sortDir=sortDir==="desc"?"asc":"desc";
-      else{ sortKey=key; sortDir="desc"; }
-      document.querySelectorAll("#table-head th").forEach(function(h){h.classList.remove("sorted-asc","sorted-desc");});
-      th.classList.add(sortDir==="desc"?"sorted-desc":"sorted-asc");
-      render();
+      var key = th.dataset.key;
+      if(sortKey === key) sortDir = sortDir === "desc" ? "asc" : "desc";
+      else { sortKey = key; sortDir = "desc"; }
+      document.querySelectorAll("#table-head th").forEach(function(header){
+        header.classList.remove("sorted-asc", "sorted-desc");
+      });
+      th.classList.add(sortDir === "desc" ? "sorted-desc" : "sorted-asc");
+      if(currentView === "sessions") renderSessionsView();
     };
   });
 
-  document.getElementById("search").addEventListener("input",function(){searchText=this.value.trim();render();});
+  document.getElementById("search").addEventListener("input", function(){
+    searchText = this.value.trim();
+    renderCurrentView();
+  });
+  document.getElementById("inact-days").addEventListener("input", function(){
+    if(currentView === "sessions") renderSessionsView();
+  });
 
-  fetchData().then(function(){ refreshCtrl.schedule(); });
+  document.querySelectorAll("#workspace-tabs [data-view]").forEach(function(btn){
+    btn.onclick = async function(){
+      currentView = btn.dataset.view;
+      if(currentView === "usage" && !usageData){
+        try{
+          await fetchUsageData();
+        }catch(e){
+          setErrorBanner(String(e));
+        }
+      } else {
+        renderCurrentView();
+      }
+    };
+  });
+
+  document.querySelectorAll("#usage-preset-pills [data-preset]").forEach(function(btn){
+    btn.onclick = async function(){
+      usageState.preset = btn.dataset.preset;
+      document.querySelectorAll("#usage-preset-pills [data-preset]").forEach(function(node){
+        node.classList.toggle("active", node.dataset.preset === usageState.preset);
+      });
+      var custom = usageState.preset === "custom";
+      ["usage-start", "usage-end", "usage-apply-range", "usage-start-wrap", "usage-end-wrap"].forEach(function(id){
+        document.getElementById(id).classList.toggle("hidden", !custom);
+      });
+      if(!custom){
+        usageState.zoomEnd = -1;
+        clearUsageSelection();
+        await fetchUsageData();
+      }
+    };
+  });
+
+  document.getElementById("usage-bucket").addEventListener("change", async function(){
+    usageState.bucket = this.value;
+    usageState.zoomEnd = -1;
+    clearUsageSelection();
+    await fetchUsageData();
+  });
+  document.getElementById("usage-apply-range").addEventListener("click", async function(){
+    usageState.zoomEnd = -1;
+    clearUsageSelection();
+    await fetchUsageData();
+  });
+  document.getElementById("usage-reset-zoom").addEventListener("click", function(){
+    if(!usageData || !(usageData.buckets || []).length) return;
+    var span = usageBucketCountDefault(usageState.bucket);
+    usageState.zoomEnd = usageData.buckets.length - 1;
+    usageState.zoomStart = Math.max(0, usageState.zoomEnd - span + 1);
+    renderUsageView();
+  });
+
+  document.querySelectorAll("#usage-breakdown-tabs [data-breakdown]").forEach(function(btn){
+    btn.onclick = function(){
+      usageState.breakdown = btn.dataset.breakdown;
+      document.querySelectorAll("#usage-breakdown-tabs [data-breakdown]").forEach(function(node){
+        node.classList.toggle("active", node.dataset.breakdown === usageState.breakdown);
+      });
+      renderUsageBreakdown();
+      renderUsageDetail();
+    };
+  });
+
+  refreshCurrentView().then(function(){ refreshCtrl.schedule(); });
 })();
 </script>
 </body>

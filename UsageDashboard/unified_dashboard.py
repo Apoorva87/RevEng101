@@ -11,12 +11,13 @@ from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from providers.base import SessionProvider, NormalizedSession, classify_activity
 from providers.claude_provider import ClaudeProvider
 from providers.codex_provider import CodexProvider
+from usage_timeline import build_usage_breakdown, build_usage_timeline
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8878
@@ -119,6 +120,40 @@ class SessionHub:
                     return provider.raw_snapshot()
         return None
 
+    def usage_timeline(
+        self,
+        provider_id: str = "all",
+        bucket: str = "hour",
+        preset: str = "7d",
+        start: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            snapshots = [provider.usage_snapshot() for provider in self.providers]
+        return build_usage_timeline(
+            snapshots,
+            provider_filter=provider_id,
+            bucket=bucket,
+            preset=preset,
+            start_raw=start,
+            end_raw=end,
+        )
+
+    def usage_breakdown(
+        self,
+        provider_id: str = "all",
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            snapshots = [provider.usage_snapshot() for provider in self.providers]
+        return build_usage_breakdown(
+            snapshots,
+            provider_filter=provider_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+        )
+
     def delete_session(self, session_id: str) -> dict[str, Any]:
         """Delete a session by its ID, delegating to the appropriate provider."""
         with self._lock:
@@ -200,6 +235,34 @@ class UnifiedHandler(BaseHTTPRequestHandler):
         if path == "/api/sessions":
             try:
                 self._send_json(self.server.hub.scan_all())
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/usage":
+            try:
+                params = parse_qs(parsed.query)
+                payload = self.server.hub.usage_timeline(
+                    provider_id=(params.get("provider") or ["all"])[0],
+                    bucket=(params.get("bucket") or ["hour"])[0],
+                    preset=(params.get("preset") or ["7d"])[0],
+                    start=(params.get("start") or [None])[0],
+                    end=(params.get("end") or [None])[0],
+                )
+                self._send_json(payload)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/usage-breakdown":
+            try:
+                params = parse_qs(parsed.query)
+                payload = self.server.hub.usage_breakdown(
+                    provider_id=(params.get("provider") or ["all"])[0],
+                    start_ts=float((params.get("start_ts") or [None])[0]),
+                    end_ts=float((params.get("end_ts") or [None])[0]),
+                )
+                self._send_json(payload)
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
             return

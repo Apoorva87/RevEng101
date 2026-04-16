@@ -95,6 +95,10 @@ class SessionProvider(ABC):
     def raw_snapshot(self) -> dict[str, Any]:
         ...
 
+    def usage_snapshot(self) -> dict[str, Any]:
+        """Return normalized usage and limit events for timeline aggregation."""
+        return {"provider": self.provider_id, "usage_events": [], "limit_events": []}
+
     def delete_session(self, session_id: str) -> dict[str, Any]:
         """Delete a session. Override in subclasses that support deletion."""
         return {"error": f"Delete not supported for provider {self.provider_id}"}

@@ -14,6 +14,9 @@ html,body{height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--ink);font:12px/1.4 var(--mono)}
 a{color:var(--accent2);text-decoration:none}
 button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.hidden{display:none!important}
+.mono{font-family:var(--mono)}
+.subline{display:block;font-size:10px;color:var(--muted);margin-top:2px}
 
 /* ── Page layout: flex column, scrollable middle, pinned bottom ── */
 .page-layout{display:flex;flex-direction:column;height:100vh;overflow:hidden}
@@ -42,6 +45,7 @@ button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
 .pill{padding:2px 8px;border-radius:3px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line);white-space:nowrap}
 .pill:hover{color:var(--ink);border-color:var(--muted)}
 .pill.active{background:var(--accent);color:#000;font-weight:700;border-color:var(--accent)}
+.workspace-tabs{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:10px;color:var(--accent);background:rgba(55,199,167,.1);border:1px solid rgba(55,199,167,.2)}
 .chip .chip-x{cursor:pointer;font-weight:700;opacity:.6}
 .chip .chip-x:hover{opacity:1}
@@ -84,9 +88,11 @@ button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
 .controls-row select:focus{border-color:var(--accent)}
 .controls-row input[type="datetime-local"]{padding:3px 6px;background:var(--bg);border:1px solid var(--line);border-radius:3px;color:var(--ink);font:11px var(--mono);outline:none}
 .controls-row label{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+.usage-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
 /* ── Table ── */
 .table-wrap{overflow-x:auto;overflow-y:auto;flex:1}
+.view-panel{height:100%}
 table{width:100%;border-collapse:collapse}
 th{padding:4px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:var(--bg2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;cursor:pointer;white-space:nowrap;user-select:none}
 th:hover{color:var(--ink)}
@@ -119,6 +125,45 @@ tr.selected td{background:rgba(55,199,167,.08)}
 .detail-field .dvalue.mono{font-family:var(--mono)}
 .cmd-copy{display:inline-block;padding:2px 6px;margin-left:4px;border:1px solid var(--line);border-radius:2px;font-size:10px;cursor:pointer;color:var(--muted)}
 .cmd-copy:hover{color:var(--ink);border-color:var(--accent)}
+
+/* ── Usage workspace ── */
+.usage-shell{display:flex;flex-direction:column;gap:10px;padding:10px}
+.usage-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.usage-stat,.usage-card{background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.usage-stat{padding:10px}
+.usage-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.usage-stat-value{font:700 18px/1.1 var(--sans);margin-top:6px;color:var(--ink)}
+.usage-stat-sub{font-size:10px;color:var(--muted);margin-top:4px}
+.usage-card{padding:10px}
+.usage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.usage-title{font:700 18px/1.1 var(--sans);margin-top:4px}
+.usage-meta{font-size:11px;color:var(--muted);max-width:520px}
+.usage-series{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.series-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);font-size:11px;color:var(--muted)}
+.series-pill:hover{color:var(--ink);border-color:var(--muted)}
+.series-pill.active{color:var(--ink);border-color:var(--series-color,var(--accent));box-shadow:inset 0 0 0 1px var(--series-color,var(--accent))}
+.usage-chart-wrap{position:relative;border:1px solid var(--line);border-radius:4px;background:linear-gradient(180deg, rgba(255,255,255,.02), transparent);overflow:auto}
+.usage-chart-svg{display:block;min-width:960px;width:100%;height:auto}
+.usage-day-band{fill:rgba(255,255,255,.02)}
+.usage-day-band.alt{fill:rgba(98,167,255,.04)}
+.usage-day-boundary{stroke:rgba(255,255,255,.16);stroke-width:1;stroke-dasharray:3 5}
+.usage-grid{stroke:rgba(255,255,255,.08);stroke-width:1}
+.usage-axis{stroke:rgba(255,255,255,.14);stroke-width:1}
+.usage-line{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.usage-hit{fill:transparent;pointer-events:none}
+.usage-hit:hover{fill:rgba(98,167,255,.06)}
+.usage-hit.active{fill:rgba(55,199,167,.08)}
+.usage-hit.range-active{fill:rgba(246,193,119,.08)}
+.usage-point{stroke:rgba(10,14,20,.72);stroke-width:1}
+.usage-marker{stroke:rgba(10,14,20,.82);stroke-width:1.15}
+.usage-selection{stroke:rgba(246,193,119,.85);stroke-width:1.5;stroke-dasharray:4 4}
+.usage-range-band{fill:rgba(246,193,119,.12);stroke:rgba(246,193,119,.5);stroke-width:1}
+.usage-chart-tooltip{position:fixed;z-index:120;min-width:180px;max-width:320px;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:rgba(10,14,20,.97);box-shadow:0 16px 32px rgba(0,0,0,.32);font-size:11px;color:var(--ink);pointer-events:none}
+.usage-tooltip-title{font-weight:700;color:var(--ink);margin-bottom:6px}
+.usage-tooltip-row{display:flex;gap:14px;justify-content:space-between;align-items:flex-start}
+.usage-tooltip-row + .usage-tooltip-row{margin-top:3px}
+.usage-tooltip-key{color:var(--muted)}
+.usage-tooltip-value{color:var(--ink);text-align:right;word-break:break-word}
 
 /* ── Timeline ── */
 .timeline-wrap{padding:10px;background:var(--bg2)}
@@ -158,7 +203,7 @@ tr.selected td{background:rgba(55,199,167,.08)}
 .selection-summary{padding:6px 10px;background:var(--panel);border:1px solid var(--line);border-radius:4px;margin:6px 10px 0;font-size:11px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .selection-summary .sel-label{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.06em}
 .selection-summary .sel-value{font-weight:700;color:var(--accent)}
-.selection-summary .sel-clear{margin-left:auto;color:var(--muted);cursor:pointer;font-size:10px}
+.selection-summary .sel-clear{margin-left:auto;color:var(--muted);cursor:pointer;font-size:10px;background:transparent;border:none;padding:0}
 .selection-summary .sel-clear:hover{color:var(--ink)}
 
 /* ── Aggregate tooltip ── */

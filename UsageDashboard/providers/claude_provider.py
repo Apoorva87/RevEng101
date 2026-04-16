@@ -78,6 +78,16 @@ class ClaudeProvider(SessionProvider):
         with self._lock:
             return self._analyzer.snapshot()
 
+    def usage_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            snapshot = self._analyzer.snapshot()
+        return {
+            "provider": "claude",
+            "scanned_at": snapshot.get("generated_at"),
+            "usage_events": list(snapshot.get("usage_events") or []),
+            "limit_events": list(snapshot.get("limit_events") or []),
+        }
+
     def delete_session(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             snapshot = self._analyzer.snapshot()

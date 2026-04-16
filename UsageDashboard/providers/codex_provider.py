@@ -130,6 +130,10 @@ class CodexProvider(SessionProvider):
         with self._lock:
             return self._app.build_snapshot(preset="all")
 
+    def usage_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return self._app.usage_snapshot()
+
     def delete_session(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             snapshot = self._app.build_snapshot(preset="all")

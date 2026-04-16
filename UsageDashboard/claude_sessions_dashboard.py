@@ -181,6 +181,8 @@ class SessionParseResult:
     summary: dict[str, Any]
     day_rows: list[dict[str, Any]]
     hour_rows: list[dict[str, Any]]
+    usage_events: list[dict[str, Any]]
+    limit_events: list[dict[str, Any]]
 
 
 class ClaudeSessionAnalyzer:
@@ -347,6 +349,8 @@ class ClaudeSessionAnalyzer:
         last_error_text: str | None = None
         total_turn_duration_ms = 0
         parse_errors = 0
+        usage_events: list[dict[str, Any]] = []
+        limit_events: list[dict[str, Any]] = []
 
         for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             raw_line = raw_line.strip()
@@ -407,6 +411,15 @@ class ClaudeSessionAnalyzer:
                 model_totals[model]["tool_uses"] += tool_uses
                 message_counts["assistant_messages"] += 1
                 if timestamp is not None:
+                    usage_events.append(
+                        {
+                            "timestamp": timestamp,
+                            "model": model,
+                            "usage": dict(usage),
+                            "tool_uses": tool_uses,
+                            "has_error": bool(has_error),
+                        }
+                    )
                     hour = ts_to_local(timestamp).replace(minute=0, second=0, microsecond=0)
                     day = hour.replace(hour=0)
                     merge_counter(hour_buckets[hour], usage)
@@ -419,6 +432,16 @@ class ClaudeSessionAnalyzer:
                     day_buckets[day]["errors"] += int(has_error)
                     hour_buckets[hour]["web_search_requests"] += usage["web_search_requests"]
                     day_buckets[day]["web_search_requests"] += usage["web_search_requests"]
+                if timestamp is not None and str(entry.get("error") or "").strip() == "rate_limit":
+                    limit_events.append(
+                        {
+                            "timestamp": timestamp,
+                            "kind": "rate_limit",
+                            "label": error_text or "You've hit your limit",
+                            "error": "rate_limit",
+                            "model": model,
+                        }
+                    )
 
             if kind == "user":
                 text = extract_user_text(content)
@@ -520,7 +543,13 @@ class ClaudeSessionAnalyzer:
             self._make_bucket_row(bucket_dt, "hour", session_id, project_path, project_key, values)
             for bucket_dt, values in sorted(hour_buckets.items())
         ]
-        return SessionParseResult(summary=summary, day_rows=day_rows, hour_rows=hour_rows)
+        return SessionParseResult(
+            summary=summary,
+            day_rows=day_rows,
+            hour_rows=hour_rows,
+            usage_events=usage_events,
+            limit_events=limit_events,
+        )
 
     def _session_result(self, path: Path) -> SessionParseResult:
         key = str(path)
@@ -552,6 +581,8 @@ class ClaudeSessionAnalyzer:
         sessions: list[dict[str, Any]] = []
         activity_days: list[dict[str, Any]] = []
         activity_hours: list[dict[str, Any]] = []
+        usage_events: list[dict[str, Any]] = []
+        limit_events: list[dict[str, Any]] = []
 
         for path in session_files:
             result = self._session_result(path)
@@ -575,6 +606,52 @@ class ClaudeSessionAnalyzer:
             summary["account_uuid"] = account.get("account_uuid")
             summary["organization_uuid"] = account.get("organization_uuid")
             sessions.append(summary)
+            project_name = Path(str(summary.get("project_path") or summary.get("project_key") or "")).name or (
+                summary.get("project_key") or "(unknown)"
+            )
+            for event in result.usage_events:
+                usage = dict(event.get("usage") or {})
+                usage_events.append(
+                    {
+                        "provider": "claude",
+                        "timestamp": event.get("timestamp"),
+                        "session_id": summary["session_id"],
+                        "session_label": summary["session_id"][:12],
+                        "project_key": summary.get("project_key"),
+                        "project_path": summary.get("project_path") or summary.get("project_key"),
+                        "project_name": project_name,
+                        "account_key": summary["account_key"],
+                        "account_label": summary["account_label"],
+                        "account_email": summary["account_email"],
+                        "model": event.get("model"),
+                        "tool_uses": int(event.get("tool_uses") or 0),
+                        "has_error": bool(event.get("has_error")),
+                        "usage": {
+                            **usage,
+                            "cached_tokens": int(usage.get("cache_read_input_tokens") or 0)
+                            + int(usage.get("cache_creation_input_tokens") or 0),
+                        },
+                    }
+                )
+            for event in result.limit_events:
+                limit_events.append(
+                    {
+                        "provider": "claude",
+                        "timestamp": event.get("timestamp"),
+                        "session_id": summary["session_id"],
+                        "session_label": summary["session_id"][:12],
+                        "project_key": summary.get("project_key"),
+                        "project_path": summary.get("project_path") or summary.get("project_key"),
+                        "project_name": project_name,
+                        "account_key": summary["account_key"],
+                        "account_label": summary["account_label"],
+                        "account_email": summary["account_email"],
+                        "kind": event.get("kind") or "rate_limit",
+                        "label": event.get("label") or "You've hit your limit",
+                        "error": event.get("error") or "rate_limit",
+                        "model": event.get("model"),
+                    }
+                )
             for row in result.day_rows:
                 activity_days.append(
                     {
@@ -730,6 +807,8 @@ class ClaudeSessionAnalyzer:
                 "day_rows": activity_days,
                 "hour_rows": activity_hours,
             },
+            "usage_events": usage_events,
+            "limit_events": limit_events,
             "stats_cache": self._stats_cache_summary(),
             "settings": safe_read_json(self.settings_path),
         }
