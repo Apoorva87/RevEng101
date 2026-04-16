@@ -24,7 +24,7 @@ warnings.filterwarnings(
 
 import requests
 
-from usage_hub import (
+from usage_hub_core import (
     CLAUDE_API_BASE,
     CLAUDE_KEYCHAIN_SERVICE,
     CLAUDE_TOKEN_URL,

@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
-"""Unified terminal dashboard for Claude and Codex/OpenAI accounts."""
+"""Shared account, auth, and refresh logic for the usage dashboards."""
 
 from __future__ import annotations
 
-import argparse
-import curses
 import getpass
 import json
-import locale
 import os
 import subprocess
 import time
 import uuid
-import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-warnings.filterwarnings(
-    "ignore",
-    message=r"urllib3 v2 only supports OpenSSL 1\.1\.1\+",
-)
-
 import requests
-
 
 PROJECT_DIR = Path(__file__).resolve().parent
 LOCAL_DIR = PROJECT_DIR / ".local"
@@ -59,19 +49,6 @@ DEFAULT_CLAUDE_MODELS = [
     "claude-opus-4-20250514",
     "claude-opus-4-5-20251101",
 ]
-
-KEY_HELP = (
-    "q:quit  r:refresh all  enter:refresh sel  a:add  x:hide/show  d:delete  "
-    "m:models  +/-:global rf  ]/[:acct rf  j/k:nav  left/right:fold  v:hidden  g:grid  h:help"
-)
-
-USAGE_BAR_WIDTH = 10
-ITEM_CELL_WIDTH = 28
-USAGE_CELL_WIDTH = 16
-RESET_CELL_WIDTH = 14
-REVIEW_CELL_WIDTH = 6
-EXTRA_CELL_WIDTH = 30
-STATUS_CELL_WIDTH = 30
 
 
 @dataclass
@@ -178,48 +155,12 @@ class ConfigStore:
         self.path.write_text(json.dumps(payload, indent=2) + os.linesep)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Unified Claude and Codex/OpenAI usage dashboard.")
-    parser.add_argument("--config", type=Path, default=CONFIG_PATH, help=f"Config file path. Default: {CONFIG_PATH}")
-    parser.add_argument("--no-startup-prompt", action="store_true", help="Skip the pre-dashboard account prompt.")
-    return parser.parse_args()
-
-
 def now_ts() -> float:
     return time.time()
 
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def clip(text: str, width: int) -> str:
-    if width <= 0:
-        return ""
-    if len(text) <= width:
-        return text
-    if width == 1:
-        return text[:1]
-    return text[: width - 1] + ">"
-
-
-def safe_addstr(stdscr: "curses._CursesWindow", y: int, x: int, text: str, attr: int = 0) -> None:
-    height, width = stdscr.getmaxyx()
-    if y < 0 or y >= height or x >= width:
-        return
-    available = max(0, width - x)
-    if available <= 0:
-        return
-    try:
-        stdscr.addstr(y, x, clip(text, available), attr)
-    except curses.error:
-        return
-
-
-def format_timestamp(epoch_seconds: Optional[float]) -> str:
-    if not epoch_seconds:
-        return "-"
-    return datetime.fromtimestamp(epoch_seconds).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def format_relative(epoch_seconds: Optional[float]) -> str:
@@ -246,26 +187,6 @@ def format_countdown(seconds: float) -> str:
         days, hours = divmod(hours, 24)
         return f"{days}d {hours:02d}h"
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
-def draw_bar(percent: Optional[float], width: int) -> str:
-    if width <= 0:
-        return ""
-    if percent is None:
-        return "-" * width
-    clamped = max(0.0, min(999.0, float(percent)))
-    filled = min(width, int(round((min(clamped, 100.0) / 100.0) * width)))
-    return "#" * filled + "-" * max(0, width - filled)
-
-
-def get_color_for_percent(percent: Optional[float]) -> int:
-    if percent is None:
-        return curses.color_pair(0)
-    if percent >= 100:
-        return curses.color_pair(3)
-    if percent >= 75:
-        return curses.color_pair(2)
-    return curses.color_pair(1)
 
 
 def coerce_percent(raw: Any) -> Optional[float]:
@@ -304,11 +225,14 @@ def format_future_from_remaining(base_epoch: Optional[float], seconds: Any) -> s
         return "-"
 
 
-def format_reset_cell(reset_text: str) -> str:
-    return clip(reset_text or "-", RESET_CELL_WIDTH)
+def format_epoch_like(value: Any) -> str:
+    try:
+        return datetime.fromtimestamp(float(value), timezone.utc).astimezone().strftime("%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return "-"
 
 
-def normalize_headers(headers: requests.structures.CaseInsensitiveDict[str]) -> dict[str, str]:
+def normalize_headers(headers: Any) -> dict[str, str]:
     return {str(key).lower(): str(value) for key, value in headers.items()}
 
 
@@ -368,12 +292,7 @@ def security_store_password(service: str, account: str, password: str) -> None:
 
 
 def discover_claude_client_id() -> Optional[str]:
-    """Extract the OAuth client_id from the installed Claude Code binary.
-
-    Runs `claude /dev/null 2>&1` to capture the auth error which leaks the
-    client_id, or greps the binary for UUIDs near oauth context.
-    Falls back to checking environment variable CLAUDE_OAUTH_CLIENT_ID.
-    """
+    """Extract the OAuth client_id from the installed Claude Code binary."""
     import re
     import shutil
 
@@ -389,10 +308,6 @@ def discover_claude_client_id() -> Optional[str]:
         return None
     try:
         raw = real.read_bytes()
-        # In the compiled Claude Code binary the production OAuth config
-        # appears as:  ...platform.claude.com/oauth/code/callback",CLIENT_ID:"<uuid>"
-        # The dev config uses a template URL instead, so we anchor on the
-        # production domain to pick the right one.
         uuid_pat = rb'platform\.claude\.com/oauth/code/callback",CLIENT_ID:"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"'
         match = re.search(uuid_pat, raw)
         if match:
@@ -406,7 +321,6 @@ _cached_claude_client_id: Optional[str] = None
 
 
 def get_claude_client_id() -> str:
-    """Return the Claude Code OAuth client_id, discovering it if needed."""
     global _cached_claude_client_id
     if _cached_claude_client_id is None:
         _cached_claude_client_id = discover_claude_client_id()
@@ -417,36 +331,6 @@ def get_claude_client_id() -> str:
             "client_id in the account record."
         )
     return _cached_claude_client_id
-
-
-def prompt_yes_no(prompt: str, default: bool = False) -> bool:
-    suffix = "[Y/n]" if default else "[y/N]"
-    raw = input(f"{prompt} {suffix} ").strip().lower()
-    if not raw:
-        return default
-    return raw in {"y", "yes"}
-
-
-def prompt_text(prompt: str, default: Optional[str] = None) -> str:
-    if default:
-        raw = input(f"{prompt} [{default}] ").strip()
-        return raw or default
-    return input(f"{prompt} ").strip()
-
-
-def prompt_secret(prompt: str) -> str:
-    return getpass.getpass(f"{prompt} ")
-
-
-def prompt_models(provider: str, existing: Optional[list[str]] = None) -> list[str]:
-    seed = ",".join(existing or (DEFAULT_CLAUDE_MODELS if provider == "claude" else DEFAULT_OPENAI_MODELS[:2]))
-    raw = prompt_text("Comma-separated models to probe", seed)
-    models = [item.strip() for item in raw.split(",") if item.strip()]
-    return models or (existing or [])
-
-
-def account_display_name(record: AccountRecord) -> str:
-    return f"{record.name} ({record.provider_label()}/{record.auth_kind})"
 
 
 def discover_codex_oauth() -> Optional[AccountRecord]:
@@ -1001,12 +885,6 @@ def refresh_state(session: requests.Session, state: AccountState, global_interva
     state.next_refresh_at = state.last_refresh_finished_at + state.record.effective_refresh_interval(global_interval)
 
 
-def visible_states(states: list[AccountState], show_hidden: bool) -> list[AccountState]:
-    if show_hidden:
-        return states
-    return [state for state in states if state.record.visible]
-
-
 def account_snapshot(state: AccountState) -> str:
     if state.error:
         return state.error
@@ -1050,35 +928,11 @@ def account_window_summary(state: AccountState, window: str) -> tuple[Optional[f
     return percent, format_percent_text(percent), reset
 
 
-def account_review_text(state: AccountState) -> str:
-    if state.record.provider == "codex" and state.record.auth_kind == "oauth":
-        return format_percent_text(state.summary.get("review_percent"))
-    return "-"
-
-
-def account_extra_text(state: AccountState) -> str:
-    if state.record.provider == "codex" and state.record.auth_kind == "oauth":
-        credits = state.summary.get("credits") or {}
-        spend_control = state.summary.get("spend_control") or {}
-        balance = credits.get("balance", "-")
-        spend = "HIT" if spend_control.get("reached") else "ok"
-        return f"credits={balance}  spend_ctrl={spend}"
-    if state.record.provider == "claude":
-        return f"overage={state.summary.get('overage_status', '-')}"
-    return (
-        f"req_rem={state.summary.get('requests_remaining', '-')}  "
-        f"tok_rem={state.summary.get('tokens_remaining', '-')}"
-    )
-
-
 def account_status_text(state: AccountState) -> str:
     if state.error:
         return state.error
     if state.record.provider == "claude":
-        return (
-            f"{state.summary.get('status_5h', '-')}/"
-            f"{state.summary.get('status_7d', '-')}"
-        )
+        return f"{state.summary.get('status_5h', '-')}/{state.summary.get('status_7d', '-')}"
     if state.record.provider == "codex" and state.record.auth_kind == "oauth":
         return str(state.summary.get("plan_type") or "ok")
     probe = state.models.get(state.summary.get("model") or state.active_model_name())
@@ -1087,528 +941,5 @@ def account_status_text(state: AccountState) -> str:
     return str(state.summary.get("status") or "ok")
 
 
-def model_window_summary(probe: ModelProbe, window: str) -> tuple[Optional[float], str, str]:
-    util_key = "unified-5h-utilization" if window == "5h" else "unified-7d-utilization"
-    reset_key = "unified-5h-reset" if window == "5h" else "unified-7d-reset"
-    raw_util = probe.rate_limits.get(util_key)
-    percent = None
-    if raw_util is not None:
-        try:
-            percent = float(raw_util) * 100.0
-        except ValueError:
-            percent = None
-    return percent, format_percent_text(percent), format_epoch_like(probe.rate_limits.get(reset_key))
-
-
-def draw_help_popup(stdscr: "curses._CursesWindow") -> None:
-    lines = [
-        "Unified Usage Hub",
-        "",
-        "This dashboard auto-discovers local OAuth accounts for Codex and Claude when they exist.",
-        "API-key accounts can be added at startup or later with the add-account flow.",
-        "",
-        "Keys",
-        "q: quit",
-        "r: refresh every account now",
-        "Enter: refresh only the selected account",
-        "a: add a new Claude or Codex/OpenAI API-key account",
-        "m: edit the selected account's probe model list",
-        "x: hide or show the selected account in the main display",
-        "d: delete a saved account that you added",
-        "+ / -: change global refresh interval",
-        "] / [: change selected account refresh interval",
-        "Left: fold selected account",
-        "Right: expand selected account",
-        "v: toggle whether hidden accounts stay visible in the list",
-        "g: toggle grid view",
-        "",
-        "Press any key to return.",
-    ]
-    stdscr.erase()
-    for idx, line in enumerate(lines):
-        safe_addstr(stdscr, idx + 1, 2, line, curses.A_BOLD if idx == 0 else 0)
-    stdscr.refresh()
-    stdscr.getch()
-
-
-def draw_dashboard(
-    stdscr: "curses._CursesWindow",
-    states: list[AccountState],
-    selected_index: int,
-    config: ConfigStore,
-    status_message: str,
-    show_hidden: bool,
-    expanded_ids: set[str],
-    grid_view: bool,
-) -> None:
-    stdscr.erase()
-    height, width = stdscr.getmaxyx()
-    shown = visible_states(states, show_hidden)
-    ok_count = sum(1 for state in states if state.last_success_at and not state.error)
-    err_count = sum(1 for state in states if state.error and state.error != "disabled")
-    safe_addstr(stdscr, 0, 0, "usage-hub", curses.A_BOLD | curses.color_pair(4))
-    safe_addstr(
-        stdscr,
-        1,
-        0,
-        clip(
-            f"accounts={len(states)} shown={len(shown)} ok={ok_count} errors={err_count} global_refresh={config.global_refresh_interval:.0f}s hidden={'on' if show_hidden else 'off'} view={'grid' if grid_view else 'tree'}",
-            width,
-        ),
-        curses.A_DIM,
-    )
-    safe_addstr(stdscr, 2, 0, clip(KEY_HELP, width), curses.A_DIM)
-
-    if grid_view:
-        draw_grid_dashboard(stdscr, shown, selected_index, status_message)
-        return
-
-    # Column separator for visual clarity
-    SEP = " | "
-
-    safe_addstr(
-        stdscr,
-        4,
-        0,
-        clip(
-            f"  {'Account':<{ITEM_CELL_WIDTH}}"
-            f"{SEP}{'5h Usage':<{USAGE_CELL_WIDTH}}"
-            f" {'Reset 5h':<{RESET_CELL_WIDTH}}"
-            f"{SEP}{'7d Usage':<{USAGE_CELL_WIDTH}}"
-            f" {'Reset 7d':<{RESET_CELL_WIDTH}}"
-            f"{SEP}{'Rev':>{REVIEW_CELL_WIDTH}}"
-            f"{SEP}{'Extra':<{EXTRA_CELL_WIDTH}}"
-            f"{SEP}{'Status':<{STATUS_CELL_WIDTH}}",
-            width,
-        ),
-        curses.A_BOLD | curses.A_UNDERLINE,
-    )
-
-    row_y = 5
-    current_y = row_y
-    for idx, state in enumerate(shown):
-        if current_y >= height - 3:
-            break
-        selected = idx == selected_index
-        attr = curses.A_REVERSE if selected else curses.A_NORMAL
-        if state.error:
-            attr |= curses.color_pair(3)
-        elif state.last_success_at:
-            attr |= curses.color_pair(1)
-
-        p5, p5_text, r5 = account_window_summary(state, "5h")
-        p7, p7_text, r7 = account_window_summary(state, "7d")
-        tree_mark = "v " if state.record.id in expanded_ids else "> "
-        kind = f"{state.record.provider_label()}/{state.record.auth_kind}"
-        item_label = clip(f"{tree_mark}{state.record.name} ({kind})", ITEM_CELL_WIDTH)
-
-        usage_5 = f"{draw_bar(p5, USAGE_BAR_WIDTH)} {p5_text:>4}"
-        usage_7 = f"{draw_bar(p7, USAGE_BAR_WIDTH)} {p7_text:>4}"
-        review = clip(account_review_text(state), REVIEW_CELL_WIDTH)
-        extra = clip(account_extra_text(state), EXTRA_CELL_WIDTH)
-        status = clip(account_status_text(state), STATUS_CELL_WIDTH)
-        main_line = (
-            f"  {item_label:<{ITEM_CELL_WIDTH}}"
-            f"{SEP}{usage_5:<{USAGE_CELL_WIDTH}}"
-            f" {format_reset_cell(r5):<{RESET_CELL_WIDTH}}"
-            f"{SEP}{usage_7:<{USAGE_CELL_WIDTH}}"
-            f" {format_reset_cell(r7):<{RESET_CELL_WIDTH}}"
-            f"{SEP}{review:>{REVIEW_CELL_WIDTH}}"
-            f"{SEP}{extra:<{EXTRA_CELL_WIDTH}}"
-            f"{SEP}{status:<{STATUS_CELL_WIDTH}}"
-        )
-        safe_addstr(stdscr, current_y, 0, clip(main_line, width), attr)
-        current_y += 1
-
-        if state.record.id not in expanded_ids:
-            continue
-
-        # Info sub-row: refresh timing
-        rf_interval = state.record.effective_refresh_interval(config.global_refresh_interval)
-        next_in = format_countdown(max(0, state.next_refresh_at - now_ts()))
-        last_ok = format_relative(state.last_success_at)
-        info_detail = f"refresh={rf_interval:.0f}s  next={next_in}  last_ok={last_ok}  src={state.record.source}  models={len(state.record.active_models())}"
-        if current_y < height - 2:
-            info_line = f"    {'  info':<{ITEM_CELL_WIDTH}}{SEP}{info_detail}"
-            safe_addstr(stdscr, current_y, 0, clip(info_line, width), curses.A_DIM)
-            current_y += 1
-
-        if state.record.provider == "claude":
-            org = state.summary.get('organization_id') or '-'
-            sub = state.summary.get('subscription_type') or '-'
-            tier = state.summary.get('rate_limit_tier') or '-'
-            overage = state.summary.get('overage_status') or '-'
-            identity = f"org={org}  sub={sub}  tier={tier}  overage={overage}"
-            if current_y < height - 2:
-                auth_line = f"    {'  auth':<{ITEM_CELL_WIDTH}}{SEP}{identity}"
-                safe_addstr(stdscr, current_y, 0, clip(auth_line, width), curses.A_DIM)
-                current_y += 1
-
-        if state.record.provider == "codex" and state.record.auth_kind == "oauth":
-            sessions = state.summary.get("sessions") or {}
-            credits = state.summary.get("credits") or {}
-            spend_control = state.summary.get("spend_control") or {}
-            detail = (
-                f"credits={credits.get('balance', '-')}  has={credits.get('has_credits', '-')}  "
-                f"unlimited={credits.get('unlimited', '-')}  spend={spend_control.get('reached', '-')}  "
-                f"sessions(5h/7d/all)={sessions.get('recent_5h', '-')}/{sessions.get('recent_7d', '-')}/{sessions.get('total', '-')}"
-            )
-            if current_y < height - 2:
-                detail_line = f"    {'  details':<{ITEM_CELL_WIDTH}}{SEP}{detail}"
-                safe_addstr(stdscr, current_y, 0, clip(detail_line, width), curses.A_DIM)
-                current_y += 1
-            continue
-
-        for model_index, model in enumerate(state.record.active_models()):
-            if current_y >= height - 2:
-                break
-            probe = state.models.get(model)
-            is_last = model_index == len(state.record.active_models()) - 1
-            branch = "`-" if is_last else "|-"
-            model_label = clip(f"  {branch} {model}", ITEM_CELL_WIDTH)
-            if not probe:
-                empty_line = (
-                    f"    {model_label:<{ITEM_CELL_WIDTH}}"
-                    f"{SEP}{'':<{USAGE_CELL_WIDTH}}"
-                    f" {'':<{RESET_CELL_WIDTH}}"
-                    f"{SEP}{'':<{USAGE_CELL_WIDTH}}"
-                    f" {'':<{RESET_CELL_WIDTH}}"
-                    f"{SEP}{'':{REVIEW_CELL_WIDTH}}"
-                    f"{SEP}{'':<{EXTRA_CELL_WIDTH}}"
-                    f"{SEP}{'waiting':<{STATUS_CELL_WIDTH}}"
-                )
-                safe_addstr(stdscr, current_y, 0, clip(empty_line, width), curses.A_DIM)
-                current_y += 1
-                continue
-            mp5, mp5_text, mr5 = model_window_summary(probe, "5h")
-            mp7, mp7_text, mr7 = model_window_summary(probe, "7d")
-            m_status = probe.status if not probe.error else probe.error
-            model_usage_5 = f"{draw_bar(mp5, USAGE_BAR_WIDTH)} {mp5_text:>4}"
-            model_usage_7 = f"{draw_bar(mp7, USAGE_BAR_WIDTH)} {mp7_text:>4}"
-            model_line = (
-                f"    {model_label:<{ITEM_CELL_WIDTH}}"
-                f"{SEP}{model_usage_5:<{USAGE_CELL_WIDTH}}"
-                f" {format_reset_cell(mr5):<{RESET_CELL_WIDTH}}"
-                f"{SEP}{model_usage_7:<{USAGE_CELL_WIDTH}}"
-                f" {format_reset_cell(mr7):<{RESET_CELL_WIDTH}}"
-                f"{SEP}{'':{REVIEW_CELL_WIDTH}}"
-                f"{SEP}{'':<{EXTRA_CELL_WIDTH}}"
-                f"{SEP}{clip(m_status, STATUS_CELL_WIDTH):<{STATUS_CELL_WIDTH}}"
-            )
-            safe_addstr(stdscr, current_y, 0, clip(model_line, width), curses.A_DIM)
-            current_y += 1
-
-    safe_addstr(stdscr, height - 1, 0, clip(status_message, width), curses.A_DIM)
-    stdscr.refresh()
-
-
-def draw_grid_dashboard(
-    stdscr: "curses._CursesWindow",
-    shown: list[AccountState],
-    selected_index: int,
-    status_message: str,
-) -> None:
-    height, width = stdscr.getmaxyx()
-    card_w = 46 if width >= 96 else max(30, width - 2)
-    cols = max(1, width // (card_w + 2))
-    safe_addstr(stdscr, 4, 0, clip("Grid View", width), curses.A_BOLD | curses.A_UNDERLINE)
-    start_y = 5
-    card_h = 7
-    for idx, state in enumerate(shown):
-        row = idx // cols
-        col = idx % cols
-        y = start_y + row * card_h
-        x = col * (card_w + 2)
-        if y >= height - 2:
-            break
-        p5, p5_text, r5 = account_window_summary(state, "5h")
-        p7, p7_text, r7 = account_window_summary(state, "7d")
-        attr = curses.A_REVERSE if idx == selected_index else curses.A_NORMAL
-        if state.error:
-            attr |= curses.color_pair(3)
-        elif state.last_success_at:
-            attr |= curses.color_pair(1)
-        title = f"{state.record.name} ({state.record.provider_label()}/{state.record.auth_kind})"
-        safe_addstr(stdscr, y, x, clip(title, card_w), attr | curses.A_BOLD)
-        safe_addstr(stdscr, y + 1, x, "-" * min(card_w, len(title)), curses.A_DIM)
-        safe_addstr(stdscr, y + 2, x, clip(f"  5h: {draw_bar(p5, 10)} {p5_text:>4}  resets {r5}", card_w), attr)
-        safe_addstr(stdscr, y + 3, x, clip(f"  7d: {draw_bar(p7, 10)} {p7_text:>4}  resets {r7}", card_w), attr)
-        review_text = account_review_text(state)
-        extra_text = account_extra_text(state)
-        if review_text != "-":
-            safe_addstr(stdscr, y + 4, x, clip(f"  Review: {review_text}  {extra_text}", card_w), attr)
-        else:
-            safe_addstr(stdscr, y + 4, x, clip(f"  {extra_text}", card_w), attr)
-        safe_addstr(stdscr, y + 5, x, clip(f"  Status: {account_status_text(state)}", card_w), attr)
-    safe_addstr(stdscr, height - 1, 0, clip(status_message, width), curses.A_DIM)
-    stdscr.refresh()
-
-
 def build_states(accounts: list[AccountRecord]) -> list[AccountState]:
     return [AccountState(record=account) for account in accounts]
-
-
-def format_epoch_like(value: Any) -> str:
-    try:
-        return datetime.fromtimestamp(float(value), timezone.utc).astimezone().strftime("%m-%d %H:%M")
-    except (TypeError, ValueError, OSError):
-        return "-"
-
-
-def account_prompt_flow(store: ConfigStore) -> bool:
-    changed = False
-    print()
-    print("Discovered local OAuth accounts will be loaded automatically when available.")
-    print()
-    print("==============================\n")
-    if prompt_yes_no("Add a Claude API-key account now?"):
-        account = interactive_account_create("claude")
-        if account:
-            store.accounts.append(account)
-            changed = True
-    if prompt_yes_no("Add a Codex/OpenAI API-key account now?"):
-        account = interactive_account_create("codex")
-        if account:
-            store.accounts.append(account)
-            changed = True
-    return changed
-
-
-def interactive_account_create(provider: str) -> Optional[AccountRecord]:
-    provider_label = "Claude" if provider == "claude" else "Codex/OpenAI"
-    print()
-    print(f"Adding {provider_label} API-key account")
-    name = prompt_text("Account label", f"{provider_label} API")
-    api_key = prompt_secret("API key")
-    if not api_key.strip():
-        print("No key entered. Skipping.")
-        return None
-    models = prompt_models(provider)
-    default_model = models[0] if models else None
-    return AccountRecord(
-        id=f"{provider}-api-{slugify(name)}-{uuid.uuid4().hex[:6]}",
-        name=name,
-        provider=provider,
-        auth_kind="api",
-        visible=True,
-        default_model=default_model,
-        models=models,
-        api_key=api_key.strip(),
-        api_base=CLAUDE_API_BASE if provider == "claude" else OPENAI_API_BASE,
-        source="saved",
-        user_added=True,
-    )
-
-
-def with_prompt_pause(stdscr: "curses._CursesWindow") -> None:
-    curses.def_prog_mode()
-    curses.endwin()
-
-
-def restore_after_prompt(stdscr: "curses._CursesWindow") -> None:
-    curses.reset_prog_mode()
-    stdscr.clear()
-    stdscr.refresh()
-
-
-def add_account_from_ui(stdscr: "curses._CursesWindow", store: ConfigStore) -> tuple[Optional[AccountRecord], str]:
-    with_prompt_pause(stdscr)
-    try:
-        provider_raw = prompt_text("Provider to add (claude/codex)", "claude").strip().lower()
-        provider = "codex" if provider_raw.startswith("c") and provider_raw != "claude" else "claude"
-        account = interactive_account_create(provider)
-        if not account:
-            return None, "Add-account flow cancelled."
-        store.accounts.append(account)
-        store.save()
-        return account, f"Added {account_display_name(account)}"
-    finally:
-        restore_after_prompt(stdscr)
-
-
-def edit_models_from_ui(
-    stdscr: "curses._CursesWindow",
-    store: ConfigStore,
-    state: AccountState,
-) -> str:
-    if state.record.provider == "codex" and state.record.auth_kind == "oauth":
-        return "Codex OAuth uses account-level usage, so there is no model list to edit."
-    with_prompt_pause(stdscr)
-    try:
-        suggestions = ", ".join(state.available_models[:12]) if state.available_models else "(no discovered model list yet)"
-        print()
-        print(f"Known models: {suggestions}")
-        models = prompt_models(state.record.provider, state.record.active_models())
-        state.record.models = models
-        state.record.default_model = models[0] if models else None
-        for index, record in enumerate(store.accounts):
-            if record.id == state.record.id:
-                store.accounts[index] = state.record
-                break
-        store.save()
-        return f"Updated models for {state.record.name}"
-    finally:
-        restore_after_prompt(stdscr)
-
-
-def delete_account(store: ConfigStore, state: AccountState) -> str:
-    if not state.record.user_added:
-        return "Only user-added API-key accounts can be deleted."
-    store.accounts = [account for account in store.accounts if account.id != state.record.id]
-    store.save()
-    return f"Deleted {state.record.name}"
-
-
-def init_colors() -> None:
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_GREEN, -1)
-    curses.init_pair(2, curses.COLOR_YELLOW, -1)
-    curses.init_pair(3, curses.COLOR_RED, -1)
-    curses.init_pair(4, curses.COLOR_CYAN, -1)
-
-
-def main_loop(stdscr: "curses._CursesWindow", store: ConfigStore, states: list[AccountState]) -> None:
-    init_colors()
-    stdscr.nodelay(True)
-    stdscr.keypad(True)
-    selected_index = 0
-    show_hidden = False
-    expanded_ids = {state.record.id for state in states}
-    grid_view = False
-    status_message = "Refreshing accounts..."
-    session = requests.Session()
-
-    for state in states:
-        refresh_state(session, state, store.global_refresh_interval)
-    status_message = "Loaded current account snapshots."
-
-    while True:
-        shown = visible_states(states, show_hidden)
-        if shown:
-            selected_index = max(0, min(selected_index, len(shown) - 1))
-        else:
-            selected_index = 0
-
-        current_time = now_ts()
-        for state in states:
-            if state.next_refresh_at <= current_time:
-                refresh_state(session, state, store.global_refresh_interval)
-
-        draw_dashboard(stdscr, states, selected_index, store, status_message, show_hidden, expanded_ids, grid_view)
-        key = stdscr.getch()
-        if key == -1:
-            time.sleep(0.1)
-            continue
-
-        shown = visible_states(states, show_hidden)
-        current_state = shown[selected_index] if shown else None
-
-        if key in {ord("q"), ord("Q"), 3, 27}:
-            break
-        if key in {ord("h"), ord("?")}:
-            draw_help_popup(stdscr)
-            status_message = "Returned from help."
-        elif key in {ord("r")}:
-            for state in states:
-                refresh_state(session, state, store.global_refresh_interval)
-            status_message = "Refreshed all accounts."
-        elif key in {10, 13, curses.KEY_ENTER} and current_state:
-            refresh_state(session, current_state, store.global_refresh_interval)
-            status_message = f"Refreshed {current_state.record.name}"
-        elif key in {curses.KEY_UP, ord("k")} and shown:
-            selected_index = (selected_index - 1) % len(shown)
-        elif key in {curses.KEY_DOWN, ord("j"), 9} and shown:
-            selected_index = (selected_index + 1) % len(shown)
-        elif key == curses.KEY_LEFT and current_state:
-            expanded_ids.discard(current_state.record.id)
-            status_message = f"Folded {current_state.record.name}"
-        elif key == curses.KEY_RIGHT and current_state:
-            expanded_ids.add(current_state.record.id)
-            status_message = f"Expanded {current_state.record.name}"
-        elif key == ord("+"):
-            store.global_refresh_interval = min(600.0, store.global_refresh_interval + 5.0)
-            store.save()
-            status_message = f"Global refresh set to {store.global_refresh_interval:.0f}s"
-        elif key == ord("-"):
-            store.global_refresh_interval = max(5.0, store.global_refresh_interval - 5.0)
-            store.save()
-            status_message = f"Global refresh set to {store.global_refresh_interval:.0f}s"
-        elif key == ord("]") and current_state:
-            current_state.record.refresh_interval = min(
-                600.0,
-                (current_state.record.refresh_interval or store.global_refresh_interval) + 5.0,
-            )
-            store.save()
-            status_message = f"{current_state.record.name} refresh set to {current_state.record.refresh_interval:.0f}s"
-        elif key == ord("[") and current_state:
-            current_state.record.refresh_interval = max(
-                5.0,
-                (current_state.record.refresh_interval or store.global_refresh_interval) - 5.0,
-            )
-            store.save()
-            status_message = f"{current_state.record.name} refresh set to {current_state.record.refresh_interval:.0f}s"
-        elif key == ord("x") and current_state:
-            current_state.record.visible = not current_state.record.visible
-            if not current_state.record.visible:
-                show_hidden = True
-            store.save()
-            status_message = f"{current_state.record.name} visible={current_state.record.visible}"
-        elif key == ord("v"):
-            show_hidden = not show_hidden
-            status_message = f"Show hidden accounts is now {'on' if show_hidden else 'off'}."
-        elif key == ord("g"):
-            grid_view = not grid_view
-            status_message = f"View is now {'grid' if grid_view else 'tree'}."
-        elif key == ord("a"):
-            new_account, status_message = add_account_from_ui(stdscr, store)
-            if new_account:
-                states.append(AccountState(record=new_account))
-                expanded_ids.add(new_account.id)
-                refresh_state(session, states[-1], store.global_refresh_interval)
-        elif key == ord("m") and current_state:
-            status_message = edit_models_from_ui(stdscr, store, current_state)
-            refresh_state(session, current_state, store.global_refresh_interval)
-        elif key == ord("d") and current_state:
-            deleted_id = current_state.record.id
-            status_message = delete_account(store, current_state)
-            states[:] = [state for state in states if state.record.id != deleted_id]
-            selected_index = 0
-        else:
-            status_message = f"Unknown key: {key}"
-
-
-def load_store_and_accounts(args: argparse.Namespace) -> tuple[ConfigStore, list[AccountRecord]]:
-    store = ConfigStore(args.config.expanduser())
-    store.load()
-    discovered = [item for item in [discover_codex_oauth(), discover_claude_oauth()] if item]
-    accounts = merge_accounts(store.accounts, discovered)
-    normalize_builtin_accounts(accounts)
-    if accounts and not any(account.visible for account in accounts):
-        for account in accounts:
-            account.visible = True
-    store.accounts = accounts
-    return store, accounts
-
-
-def main() -> int:
-    locale.setlocale(locale.LC_ALL, "")
-    args = parse_args()
-    store, accounts = load_store_and_accounts(args)
-    if not args.no_startup_prompt and os.isatty(0):
-        changed = account_prompt_flow(store)
-        if changed:
-            accounts = store.accounts
-    store.save()
-
-    if not os.isatty(0) or not os.isatty(1):
-        print("usage_hub.py needs an interactive terminal because it uses curses.")
-        return 1
-
-    states = build_states(accounts)
-    curses.wrapper(main_loop, store, states)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
