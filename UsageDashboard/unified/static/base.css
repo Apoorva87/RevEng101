@@ -22,7 +22,7 @@ button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
 .page-layout{display:flex;flex-direction:column;height:100vh;overflow:hidden}
 .page-header{flex-shrink:0}
 .page-middle{flex:1;overflow-y:auto;overflow-x:hidden;min-height:0}
-.page-bottom{flex-shrink:0;height:25vh;min-height:140px;max-height:300px;overflow-y:auto;background:var(--bg2);border-top:2px solid var(--line)}
+.page-bottom{flex-shrink:0;height:25vh;min-height:140px;max-height:70vh;overflow-y:auto;background:var(--bg2);border-top:2px solid var(--line)}
 .page-bottom:empty{display:none;height:0;min-height:0}
 .page-bottom.closed{display:none;height:0;min-height:0}
 
@@ -135,6 +135,11 @@ tr.selected td{background:rgba(55,199,167,.08)}
 .usage-stat-value{font:700 18px/1.1 var(--sans);margin-top:6px;color:var(--ink)}
 .usage-stat-sub{font-size:10px;color:var(--muted);margin-top:4px}
 .usage-card{padding:10px}
+.panel-resize-handle{height:12px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;color:var(--muted);touch-action:none;user-select:none}
+.panel-resize-handle::before{content:"";width:48px;height:4px;border-radius:999px;background:linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent)}
+.panel-resize-handle:hover::before,.panel-resize-handle.active::before{background:linear-gradient(90deg, transparent, rgba(55,199,167,.55), transparent)}
+.detail-resize-handle{flex-shrink:0;background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.detail-resize-handle.hidden{display:none!important}
 .usage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .usage-title{font:700 18px/1.1 var(--sans);margin-top:4px}
 .usage-meta{font-size:11px;color:var(--muted);max-width:520px}

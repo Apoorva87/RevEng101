@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 import threading
 from pathlib import Path
 from typing import Any
 
-# Add parent directory to path so we can import the existing dashboard module
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from claude_sessions_dashboard import ClaudeSessionAnalyzer
-
+from providers.claude_analyzer import ClaudeSessionAnalyzer
 from providers.base import NormalizedSession, SessionProvider, state_category
 
 

@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import requests
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 LOCAL_DIR = PROJECT_DIR / ".local"
 CONFIG_PATH = LOCAL_DIR / "usage_hub.json"
 

@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 import time
 import threading
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from codex_sessions_dashboard import CodexSessionApp, DEFAULT_SESSIONS_DIR, DEFAULT_CONFIG_PATH
-
+from providers.codex_analyzer import CodexSessionApp, DEFAULT_SESSIONS_DIR, DEFAULT_CONFIG_PATH
 from providers.base import NormalizedSession, SessionProvider, state_category
 
 

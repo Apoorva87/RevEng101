@@ -112,9 +112,10 @@
             <span class="zoom-range" id="usage-zoom-range">All buckets</span>
             <button class="zoom-btn" id="usage-reset-zoom">Reset</button>
           </div>
-          <div class="usage-chart-wrap">
+          <div class="usage-chart-wrap" id="usage-chart-wrap">
             <svg id="usage-chart-svg" class="usage-chart-svg" role="img" aria-label="Token usage chart"></svg>
           </div>
+          <div class="panel-resize-handle" id="usage-chart-resize" title="Drag to resize chart"></div>
           <div class="selection-summary hidden" id="usage-selection-summary"></div>
           <div class="usage-chart-tooltip hidden" id="usage-chart-tooltip"></div>
           <div class="zoom-minimap" id="usage-zoom"></div>
@@ -131,14 +132,16 @@
               <button class="pill" data-breakdown="markers">Markers</button>
             </div>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap" id="usage-breakdown-wrap">
             <table id="usage-breakdown-table"></table>
           </div>
+          <div class="panel-resize-handle" id="usage-breakdown-resize" title="Drag to resize breakdown"></div>
         </div>
       </div>
     </div>
   </div>
 
+  <div class="panel-resize-handle hidden detail-resize-handle" id="detail-resize-handle" title="Drag to resize details"></div>
   <div class="page-bottom closed" id="detail-panel"></div>
 </div>
 
@@ -170,8 +173,142 @@
     zoomStart: 0,
     zoomEnd: -1
   };
+  var layoutState = {
+    chartHeight: null,
+    breakdownHeight: null,
+    detailHeight: null
+  };
 
   function compact(n){ return U.compact(n); }
+
+  function clampValue(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function viewportHeight(){
+    return Math.max(640, window.innerHeight || document.documentElement.clientHeight || 800);
+  }
+
+  function panelHeightLimits(kind){
+    var vh = viewportHeight();
+    if(kind === "chart"){
+      return {min:260, max:Math.max(360, Math.min(760, Math.floor(vh * 0.72)))};
+    }
+    if(kind === "breakdown"){
+      return {min:180, max:Math.max(260, Math.min(560, Math.floor(vh * 0.52)))};
+    }
+    return {min:140, max:Math.max(240, Math.min(760, Math.floor(vh * 0.7)))};
+  }
+
+  function ensureLayoutState(){
+    var chartLimits = panelHeightLimits("chart");
+    var breakdownLimits = panelHeightLimits("breakdown");
+    var detailLimits = panelHeightLimits("detail");
+    if(layoutState.chartHeight == null){
+      layoutState.chartHeight = clampValue(360, chartLimits.min, chartLimits.max);
+    } else {
+      layoutState.chartHeight = clampValue(layoutState.chartHeight, chartLimits.min, chartLimits.max);
+    }
+    if(layoutState.breakdownHeight == null){
+      layoutState.breakdownHeight = clampValue(260, breakdownLimits.min, breakdownLimits.max);
+    } else {
+      layoutState.breakdownHeight = clampValue(layoutState.breakdownHeight, breakdownLimits.min, breakdownLimits.max);
+    }
+    if(layoutState.detailHeight == null){
+      layoutState.detailHeight = clampValue(Math.round(viewportHeight() * 0.25), detailLimits.min, detailLimits.max);
+    } else {
+      layoutState.detailHeight = clampValue(layoutState.detailHeight, detailLimits.min, detailLimits.max);
+    }
+  }
+
+  function applyLayoutState(){
+    ensureLayoutState();
+    var chartWrap = document.getElementById("usage-chart-wrap");
+    var chartSvg = document.getElementById("usage-chart-svg");
+    var breakdownWrap = document.getElementById("usage-breakdown-wrap");
+    var detailPanel = document.getElementById("detail-panel");
+    var detailResize = document.getElementById("detail-resize-handle");
+    if(chartWrap){
+      chartWrap.style.height = layoutState.chartHeight + "px";
+    }
+    if(chartSvg){
+      chartSvg.style.height = layoutState.chartHeight + "px";
+    }
+    if(breakdownWrap){
+      breakdownWrap.style.height = layoutState.breakdownHeight + "px";
+    }
+    var detailOpen = !!detailPanel && !detailPanel.classList.contains("closed") && !!detailPanel.innerHTML;
+    if(detailPanel){
+      detailPanel.style.height = detailOpen ? (layoutState.detailHeight + "px") : "";
+    }
+    if(detailResize){
+      detailResize.classList.toggle("hidden", !detailOpen);
+    }
+  }
+
+  function initVerticalResizer(handleId, options){
+    var handle = document.getElementById(handleId);
+    if(!handle) return;
+    var drag = null;
+
+    function finish(event, cancelled){
+      if(!drag || drag.pointerId !== event.pointerId) return;
+      var current = drag.currentHeight;
+      if(cancelled){
+        current = drag.startHeight;
+        options.setHeight(current, "cancel");
+      } else {
+        options.setHeight(current, "end");
+      }
+      drag = null;
+      handle.classList.remove("active");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try{ handle.releasePointerCapture(event.pointerId); }catch(err){}
+    }
+
+    handle.addEventListener("pointerdown", function(event){
+      if(event.button !== 0) return;
+      ensureLayoutState();
+      drag = {
+        pointerId: event.pointerId,
+        startY: event.clientY,
+        startHeight: options.getHeight(),
+        currentHeight: options.getHeight()
+      };
+      hideUsageTooltip();
+      handle.classList.add("active");
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+
+    handle.addEventListener("pointermove", function(event){
+      if(!drag || drag.pointerId !== event.pointerId) return;
+      var limits = options.getLimits();
+      var direction = options.direction || 1;
+      var nextHeight = drag.startHeight + (event.clientY - drag.startY) * direction;
+      drag.currentHeight = clampValue(nextHeight, limits.min, limits.max);
+      options.setHeight(drag.currentHeight, "drag");
+      event.preventDefault();
+    });
+
+    handle.addEventListener("pointerup", function(event){
+      finish(event, false);
+    });
+    handle.addEventListener("pointercancel", function(event){
+      finish(event, true);
+    });
+    handle.addEventListener("lostpointercapture", function(){
+      if(!drag) return;
+      options.setHeight(drag.startHeight, "cancel");
+      drag = null;
+      handle.classList.remove("active");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
+  }
 
   function getInactivityDays(){
     var el = document.getElementById("inact-days");
@@ -770,10 +907,17 @@
 
   function renderUsageChart(){
     var svg = document.getElementById("usage-chart-svg");
+    var chartWrap = document.getElementById("usage-chart-wrap");
     var meta = document.getElementById("usage-meta");
     var zoomRange = document.getElementById("usage-zoom-range");
+    ensureLayoutState();
+    if(chartWrap){
+      chartWrap.style.height = layoutState.chartHeight + "px";
+    }
+    svg.style.height = layoutState.chartHeight + "px";
     if(!usageData || !(usageData.buckets || []).length){
       svg.innerHTML = "";
+      svg.setAttribute("viewBox", "0 0 960 " + layoutState.chartHeight);
       meta.textContent = "No token usage found in the selected scope.";
       zoomRange.textContent = "No buckets";
       document.getElementById("usage-breakdown-title").textContent = "Breakdown";
@@ -791,7 +935,7 @@
     }
     var bucketCount = visible.length;
     var width = Math.max(960, bucketCount * 34);
-    var height = 360;
+    var height = layoutState.chartHeight;
     var margin = {left:56, right:24, top:26, bottom:58};
     var innerWidth = width - margin.left - margin.right;
     var innerHeight = height - margin.top - margin.bottom;
@@ -1345,11 +1489,13 @@
           '<div class="detail-field"><div class="dlabel">Codex 7d Max</div><div class="dvalue">' + U.escHtml(formatPercent(rangeSummary.sevenDayMaxUsedPercent)) + '</div></div>' +
           '<div class="detail-field"><div class="dlabel">Claude Limit Hits</div><div class="dvalue">' + U.escHtml(String(rangeSummary.claudeLimitHits || 0)) + '</div></div>' +
         '</div>';
+      applyLayoutState();
       return;
     }
     var bucket = currentUsageBucket();
     if(!bucket){
       panel.classList.add("closed");
+      applyLayoutState();
       return;
     }
     panel.classList.remove("closed");
@@ -1368,6 +1514,7 @@
         '<div class="detail-field"><div class="dlabel">Codex 7d Max</div><div class="dvalue">' + U.escHtml(formatPercent(summary.seven_day_max_used_percent)) + '</div></div>' +
         '<div class="detail-field"><div class="dlabel">Claude Limit Hits</div><div class="dvalue">' + U.escHtml(String(summary.claude_limit_hits || 0)) + '</div></div>' +
       '</div>';
+    applyLayoutState();
   }
 
   function renderUsageView(){
@@ -1377,17 +1524,20 @@
     renderUsageSelectionSummary();
     renderUsageBreakdown();
     renderUsageDetail();
+    applyLayoutState();
   }
 
   function renderSessionDetail(){
     var panel = document.getElementById("detail-panel");
     if(!selectedSessionId){
       panel.classList.add("closed");
+      applyLayoutState();
       return;
     }
     var session = sessionsForView().find(function(row){ return row.session_id === selectedSessionId; });
     if(!session){
       panel.classList.add("closed");
+      applyLayoutState();
       return;
     }
     panel.classList.remove("closed");
@@ -1424,6 +1574,7 @@
     panel.querySelectorAll("[data-inline-copy]").forEach(function(btn){
       btn.onclick = function(){ U.copyText(btn.dataset.inlineCopy, btn); };
     });
+    applyLayoutState();
   }
 
   function renderDetail(){
@@ -1451,6 +1602,7 @@
     } else {
       renderSessionsView();
     }
+    applyLayoutState();
   }
 
   document.getElementById("table-head").querySelectorAll("th[data-key]").forEach(function(th){
@@ -1535,6 +1687,46 @@
       renderUsageBreakdown();
       renderUsageDetail();
     };
+  });
+
+  initVerticalResizer("usage-chart-resize", {
+    direction: 1,
+    getHeight: function(){ ensureLayoutState(); return layoutState.chartHeight; },
+    getLimits: function(){ return panelHeightLimits("chart"); },
+    setHeight: function(height, phase){
+      layoutState.chartHeight = height;
+      applyLayoutState();
+      if(phase === "end" || phase === "cancel"){
+        renderUsageChart();
+      }
+    }
+  });
+
+  initVerticalResizer("usage-breakdown-resize", {
+    direction: 1,
+    getHeight: function(){ ensureLayoutState(); return layoutState.breakdownHeight; },
+    getLimits: function(){ return panelHeightLimits("breakdown"); },
+    setHeight: function(height){
+      layoutState.breakdownHeight = height;
+      applyLayoutState();
+    }
+  });
+
+  initVerticalResizer("detail-resize-handle", {
+    direction: -1,
+    getHeight: function(){ ensureLayoutState(); return layoutState.detailHeight; },
+    getLimits: function(){ return panelHeightLimits("detail"); },
+    setHeight: function(height){
+      layoutState.detailHeight = height;
+      applyLayoutState();
+    }
+  });
+
+  window.addEventListener("resize", function(){
+    applyLayoutState();
+    if(currentView === "usage"){
+      renderUsageChart();
+    }
   });
 
   refreshCurrentView().then(function(){ refreshCtrl.schedule(); });
