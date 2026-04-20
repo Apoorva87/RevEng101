@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import tempfile
 
@@ -13,6 +15,17 @@ from fastapi.testclient import TestClient
 from oauthrouter.models import AppConfig, ProviderConfig, ServerConfig, Token
 from oauthrouter.token_manager import TokenManager
 from oauthrouter.token_store import TokenStore
+
+
+def _encode_jwt(payload: dict) -> str:
+    """Build an unsigned JWT with the given payload for tests."""
+    def encode_part(value: dict) -> str:
+        raw = json.dumps(value, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    header = encode_part({"alg": "none", "typ": "JWT"})
+    claims = encode_part(payload)
+    return f"{header}.{claims}.signature"
 
 
 @pytest.fixture
@@ -155,6 +168,60 @@ def test_headers_for_trace_redacts_sensitive_headers():
     assert headers["x-api-key"] == "***redacted***"
     assert headers["Cookie"] == "***redacted***"
     assert headers["content-type"] == "application/json"
+
+
+def test_apply_per_token_headers_adds_openai_account_header_from_jwt(
+    config: AppConfig,
+):
+    """OpenAI proxy requests recover the account header from the JWT payload."""
+    from oauthrouter.proxy import _apply_per_token_headers
+
+    token = Token(
+        id="codex",
+        provider="openai",
+        access_token=_encode_jwt(
+            {
+                "https://api.openai.com/auth": {
+                    "chatgpt_user_id": "user-jwt-123",
+                }
+            }
+        ),
+    )
+
+    headers = _apply_per_token_headers(
+        {"Content-Type": "application/json"},
+        "openai",
+        token,
+    )
+
+    assert headers["ChatGPT-Account-Id"] == "user-jwt-123"
+
+
+def test_apply_per_token_headers_keeps_existing_openai_account_header(
+    config: AppConfig,
+):
+    """Caller-provided account headers should not be overwritten."""
+    from oauthrouter.proxy import _apply_per_token_headers
+
+    token = Token(
+        id="codex",
+        provider="openai",
+        access_token=_encode_jwt(
+            {
+                "https://api.openai.com/auth": {
+                    "chatgpt_user_id": "user-jwt-123",
+                }
+            }
+        ),
+    )
+
+    headers = _apply_per_token_headers(
+        {"ChatGPT-Account-Id": "user-explicit"},
+        "openai",
+        token,
+    )
+
+    assert headers["ChatGPT-Account-Id"] == "user-explicit"
 
 
 def test_log_detail_route_exists():

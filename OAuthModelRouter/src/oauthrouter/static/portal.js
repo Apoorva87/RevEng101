@@ -852,86 +852,165 @@ function renderLogDetail(detail) {
     ? `<span class="provider-icon ${provider}"></span><span class="badge badge-${provider}">${provider}</span>`
     : '';
   const tokenUsed = lastAttempt ? lastAttempt.token_id || 'unknown' : '—';
-  const statusClass = final.status < 300 ? 'status-2xx' : final.status < 500 ? 'status-4xx' : 'status-5xx';
+  const finalStatus = Number(final.status);
+  const statusClass = Number.isFinite(finalStatus)
+    ? finalStatus < 300 ? 'status-2xx' : finalStatus < 500 ? 'status-4xx' : 'status-5xx'
+    : '';
 
   const pendingTrees = [];
-  const bodyBlock = (title, bodyObj, { full = false, open = true } = {}) => {
-    const bodyInfo = bodyObj || {};
-    const text = bodyInfo.text || '';
-    const parsed = tryParseJson(text);
-    const extraClass = full ? ' full' : '';
-    const openAttr = open ? ' open' : '';
-    const meta = [];
-    if (bodyInfo.text_truncated) {
-      const shown = text.length;
-      const total = bodyInfo.text_total_chars || shown;
-      meta.push(`truncated: showing ${shown.toLocaleString()} of ${total.toLocaleString()} chars`);
-    }
-    if (bodyInfo.size_bytes) {
-      meta.push(`${bodyInfo.size_bytes.toLocaleString()} bytes`);
-    }
+
+  const renderSection = (title, contentHtml, { open = false, meta = [] } = {}) => {
     const metaHtml = meta.length
       ? `<span class="trace-meta">${esc(meta.join(' · '))}</span>`
       : '';
-    if (parsed !== null && typeof parsed === 'object') {
-      const id = `json-tree-${pendingTrees.length}`;
-      pendingTrees.push({ id, value: parsed });
-      return `
-        <details class="trace-block${extraClass}"${openAttr}>
-          <summary class="trace-title">
-            <span>${esc(title)}</span>
-            ${metaHtml}
-          </summary>
-          <div class="json-tree" id="${id}"></div>
-        </details>`;
-    }
-    const lines = formatResponseBodyLines({ body: bodyInfo });
-    const html = lines.map(l => {
-      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-      return `<div class="diff-line">${esc(l)}</div>`;
-    }).join('');
     return `
-      <details class="trace-block${extraClass}"${openAttr}>
+      <details class="trace-block"${open ? ' open' : ''}>
         <summary class="trace-title">
           <span>${esc(title)}</span>
           ${metaHtml}
         </summary>
-        <div class="trace-pre diff-pre">${html}</div>
+        ${contentHtml}
       </details>`;
   };
 
-  const headersDiffBlock = (leftTitle, rightTitle, leftReq, rightReq) => {
-    const left = formatRequestHeaderLines(leftReq);
-    const right = formatRequestHeaderLines(rightReq);
-    const leftSet = new Set(left);
-    const rightSet = new Set(right);
-    const renderSide = (lines, otherSet, diffCls) => lines.map(l => {
-      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-      const cls = !otherSet.has(l) ? ` ${diffCls}` : '';
-      return `<div class="diff-line${cls}">${esc(l)}</div>`;
-    }).join('');
-    return `
-      <details class="trace-block" open>
-        <summary class="trace-title"><span>${esc(leftTitle)}</span></summary>
-        <div class="trace-pre diff-pre">${renderSide(left, rightSet, 'diff-removed')}</div>
-      </details>
-      <details class="trace-block" open>
-        <summary class="trace-title"><span>${esc(rightTitle)}</span></summary>
-        <div class="trace-pre diff-pre">${renderSide(right, leftSet, 'diff-added')}</div>
-      </details>`;
+  const renderJsonSection = (
+    title,
+    value,
+    { open = false, meta = [], emptyLabel = '(none)', treatEmptyObjectAsEmpty = false } = {}
+  ) => {
+    const isEmptyObject = (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      !Object.keys(value).length
+    );
+    if (value === undefined || value === null || (treatEmptyObjectAsEmpty && isEmptyObject)) {
+      return renderSection(
+        title,
+        `<pre class="trace-pre trace-empty">${esc(emptyLabel)}</pre>`,
+        { open, meta }
+      );
+    }
+    const id = `json-tree-${pendingTrees.length}`;
+    pendingTrees.push({ id, value });
+    return renderSection(title, `<div class="json-tree" id="${id}"></div>`, { open, meta });
   };
 
-  const headersBlock = (title, res) => {
-    const lines = formatResponseHeaderLines(res);
-    const html = lines.map(l => {
-      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-      return `<div class="diff-line">${esc(l)}</div>`;
-    }).join('');
+  const renderTextSection = (title, text, { open = false, meta = [], emptyLabel = '(none)' } = {}) => {
+    const content = text && String(text).length ? String(text) : emptyLabel;
+    const emptyClass = content === emptyLabel ? ' trace-empty' : '';
+    return renderSection(
+      title,
+      `<pre class="trace-pre${emptyClass}">${esc(content)}</pre>`,
+      { open, meta }
+    );
+  };
+
+  const renderBodySection = (title, bodyInfo, headers, { open = true } = {}) => {
+    const body = bodyInfo || {};
+    const meta = bodyMetaParts(body, headers);
+    const structured = parseStructuredPayload(body, headers);
+    if (structured !== null) {
+      return renderJsonSection(title, structured, {
+        open,
+        meta,
+        emptyLabel: '(empty body)',
+      });
+    }
+    return renderTextSection(title, getBodyPreviewText(body), {
+      open,
+      meta,
+      emptyLabel: '(empty body)',
+    });
+  };
+
+  const renderStageCard = ({ kicker, title, meta = [], sections = [] }) => `
+    <section class="trace-stage">
+      <div class="trace-stage-head">
+        <div>
+          <div class="trace-stage-kicker">${esc(kicker)}</div>
+          <div class="trace-stage-title">${esc(title)}</div>
+        </div>
+        ${meta.length
+          ? `<div class="trace-stage-meta-list">${meta.map(item => `<span class="trace-pill">${esc(item)}</span>`).join('')}</div>`
+          : ''}
+      </div>
+      <div class="trace-stage-body">
+        ${sections.join('')}
+      </div>
+    </section>`;
+
+  const renderIncomingStage = () => renderStageCard({
+    kicker: 'Incoming Request',
+    title: formatHttpTarget(incoming),
+    meta: [countLabel('header', incoming.headers)],
+    sections: [
+      renderJsonSection('Headers', incoming.headers || {}, {
+        open: false,
+        meta: [countLabel('header', incoming.headers)],
+        emptyLabel: '(no headers)',
+        treatEmptyObjectAsEmpty: true,
+      }),
+      renderBodySection('Body', incoming.body, incoming.headers, {
+        open: hasVisibleBody(incoming.body),
+      }),
+    ],
+  });
+
+  const renderRequestStage = (request, tokenId) => renderStageCard({
+    kicker: 'Upstream Request',
+    title: formatHttpTarget(request),
+    meta: [
+      tokenId ? `token ${tokenId}` : null,
+      countLabel('header', request.headers),
+    ].filter(Boolean),
+    sections: [
+      renderJsonSection('Headers', request.headers || {}, {
+        open: false,
+        meta: [countLabel('header', request.headers)],
+        emptyLabel: '(no headers)',
+        treatEmptyObjectAsEmpty: true,
+      }),
+      renderBodySection('Body', request.body, request.headers, {
+        open: hasVisibleBody(request.body),
+      }),
+    ],
+  });
+
+  const renderResponseStage = response => renderStageCard({
+    kicker: 'Upstream Response',
+    title: `Status ${response.status ?? 'pending'}${response.streaming ? ' · streaming' : ''}`,
+    meta: [
+      countLabel('header', response.headers),
+      response.streaming ? 'stream' : null,
+    ].filter(Boolean),
+    sections: [
+      renderJsonSection('Headers', response.headers || {}, {
+        open: false,
+        meta: [countLabel('header', response.headers)],
+        emptyLabel: '(no headers)',
+        treatEmptyObjectAsEmpty: true,
+      }),
+      renderBodySection('Body', response.body, response.headers, {
+        open: hasVisibleBody(response.body),
+      }),
+    ],
+  });
+
+  const renderAttempt = (attempt, index) => {
+    const request = attempt.request || {};
+    const response = attempt.response || {};
     return `
-      <details class="trace-block full" open>
-        <summary class="trace-title"><span>${esc(title)}</span></summary>
-        <div class="trace-pre diff-pre">${html}</div>
-      </details>`;
+      <section class="trace-attempt-shell">
+        <div class="trace-attempt-head">
+          <div class="trace-attempt-label">Attempt ${index + 1}</div>
+          <div class="trace-attempt-subtle">Token: ${esc(attempt.token_id || 'unknown')}</div>
+        </div>
+        <div class="trace-attempt-grid">
+          ${renderRequestStage(request, attempt.token_id || '')}
+          ${renderResponseStage(response)}
+        </div>
+      </section>`;
   };
 
   panel.innerHTML = `
@@ -946,31 +1025,20 @@ function renderLogDetail(detail) {
       </div>
       <button class="btn btn-sm" onclick="copyTrace('${esc(detail.id || '')}')">Copy JSON</button>
     </div>
-    ${attempts.map((a, i) => {
-      const req = a.request || {};
-      const res = a.response || {};
-      return `
-        ${attempts.length > 1 ? `<div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text2);background:var(--surface2)">Attempt ${i + 1} · Token: ${esc(a.token_id || 'unknown')}</div>` : ''}
-        <div class="detail-grid">
-          ${headersDiffBlock('Request Headers (In)', 'Request Headers (Out)', incoming, req)}
-          ${bodyBlock('Request Body', req.body, { full: true })}
-          ${headersBlock('Response Headers', res)}
-          ${bodyBlock('Response Body', res.body, { full: true })}
-        </div>`;
-    }).join('')}
-    ${!attempts.length ? `<div class="detail-grid">${traceBlock('Incoming Request', formatRequestLines(incoming).join('\\n'), 'full')}</div>` : ''}`;
+    <div class="detail-grid">
+      ${renderIncomingStage()}
+      ${attempts.map((attempt, index) => renderAttempt(attempt, index)).join('')}
+    </div>`;
 
   pendingTrees.forEach(({ id, value }) => mountJsonTree(id, value));
   panel.dataset.trace = JSON.stringify(detail, null, 2);
 }
 
-function formatRequestHeaderLines(req) {
-  if (!req || !Object.keys(req).length) return ['(no data)'];
-  const lines = [`${req.method || '?'} ${req.url || req.path || ''}`];
-  lines.push('── Headers ──────────────────────────');
-  for (const [k, v] of Object.entries(req.headers || {})) lines.push(`${k}: ${v}`);
-  if (!Object.keys(req.headers || {}).length) lines.push('(none)');
-  return lines;
+function formatHttpTarget(req) {
+  if (!req || !Object.keys(req).length) return '(no request data)';
+  const method = req.method || '?';
+  const target = req.url || req.path || '';
+  return `${method} ${target}`.trim();
 }
 
 function mountJsonTree(elementId, value) {
@@ -983,7 +1051,7 @@ function mountJsonTree(elementId, value) {
     el.appendChild(pre);
     return;
   }
-  const formatter = new JSONFormatter(value, 2, {
+  const formatter = new JSONFormatter(value, 1, {
     theme: 'dark',
     hoverPreviewEnabled: true,
     hoverPreviewArrayCount: 50,
@@ -991,97 +1059,77 @@ function mountJsonTree(elementId, value) {
   el.appendChild(formatter.render());
 }
 
-function diffBlock(leftTitle, rightTitle, leftLines, rightLines) {
-  const leftSet = new Set(leftLines);
-  const rightSet = new Set(rightLines);
-  const leftHtml = leftLines.map(l => {
-    if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-    const cls = !rightSet.has(l) ? ' diff-removed' : '';
-    return `<div class="diff-line${cls}">${esc(l)}</div>`;
-  }).join('');
-  const rightHtml = rightLines.map(l => {
-    if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-    const cls = !leftSet.has(l) ? ' diff-added' : '';
-    return `<div class="diff-line${cls}">${esc(l)}</div>`;
-  }).join('');
-  return `
-    <div class="trace-block">
-      <div class="trace-title">${esc(leftTitle)}</div>
-      <div class="trace-pre diff-pre">${leftHtml}</div>
-    </div>
-    <div class="trace-block">
-      <div class="trace-title">${esc(rightTitle)}</div>
-      <div class="trace-pre diff-pre">${rightHtml}</div>
-    </div>`;
+function countLabel(noun, value) {
+  const count = Object.keys(value || {}).length;
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-function plainBlock(title, lines) {
-  const html = lines.map(l => {
-    if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
-    return `<div class="diff-line">${esc(l)}</div>`;
-  }).join('');
-  return `
-    <div class="trace-block">
-      <div class="trace-title">${esc(title)}</div>
-      <div class="trace-pre diff-pre">${html}</div>
-    </div>`;
+function hasVisibleBody(body) {
+  return Boolean(body && !body.is_empty && String(body.text || '').length);
 }
 
-function traceBlock(title, text, extra = '') {
-  return `
-    <div class="trace-block ${extra}">
-      <div class="trace-title">${esc(title)}</div>
-      <pre class="trace-pre">${esc(text)}</pre>
-    </div>`;
+function findHeaderValue(headers, name) {
+  const wanted = String(name || '').toLowerCase();
+  for (const [key, value] of Object.entries(headers || {})) {
+    if (key.toLowerCase() === wanted) return String(value || '');
+  }
+  return '';
 }
 
-function formatRequestLines(req) {
-  if (!req || !Object.keys(req).length) return ['(no data)'];
-  const lines = [`${req.method || '?'} ${req.url || req.path || ''}`];
-  lines.push('── Headers ──────────────────────────');
-  for (const [k, v] of Object.entries(req.headers || {})) lines.push(`${k}: ${v}`);
-  if (!Object.keys(req.headers || {}).length) lines.push('(none)');
-  lines.push('── Body ─────────────────────────────');
-  lines.push(...formatBodyLines(req.body || {}));
-  return lines;
+function isJsonContentType(contentType) {
+  const normalized = String(contentType || '').toLowerCase();
+  return normalized.includes('/json') || normalized.includes('+json');
 }
 
-function formatResponseHeaderLines(res) {
-  if (!res || !Object.keys(res).length) return ['(no response)'];
-  const lines = [`Status: ${res.status ?? '?'}${res.streaming ? ' (streaming)' : ''}`];
-  lines.push('── Headers ──────────────────────────');
-  for (const [k, v] of Object.entries(res.headers || {})) lines.push(`${k}: ${v}`);
-  if (!Object.keys(res.headers || {}).length) lines.push('(none)');
-  return lines;
+function parseStructuredPayload(body, headers = {}) {
+  if (!body || body.is_empty) return null;
+  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') return null;
+
+  let candidate = String(body.text || '').trim();
+  if (!candidate) return null;
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    const parsed = tryParseJson(candidate);
+    if (parsed === null) return null;
+    if (parsed && typeof parsed === 'object') return parsed;
+    if (typeof parsed === 'string') {
+      const nested = parsed.trim();
+      if (!nested || nested === candidate) return null;
+      candidate = nested;
+      continue;
+    }
+    return isJsonContentType(findHeaderValue(headers, 'content-type')) ? parsed : null;
+  }
+
+  return null;
 }
 
-function formatResponseBodyLines(res) {
-  if (!res || !Object.keys(res).length) return ['(no response)'];
-  return formatBodyLines(res.body || {});
+function getBodyPreviewText(body) {
+  if (!body || body.is_empty) return '';
+  const raw = String(body.text || '');
+  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') return raw;
+
+  let decoded = raw;
+  for (let depth = 0; depth < 2; depth += 1) {
+    const parsed = tryParseJson(decoded);
+    if (typeof parsed !== 'string') break;
+    decoded = parsed;
+  }
+  return decoded;
 }
 
-function formatBodyLines(body) {
-  if (!body || body.is_empty) return ['(empty)'];
-  const text = body.text || '';
+function bodyMetaParts(body, headers = {}) {
   const meta = [];
+  const contentType = findHeaderValue(headers, 'content-type');
+  if (contentType) meta.push(contentType.split(';')[0]);
+  if (body.size_bytes) meta.push(`${body.size_bytes.toLocaleString()} bytes`);
+  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') meta.push(body.encoding);
   if (body.text_truncated) {
-    const shownChars = text.length;
+    const shownChars = String(body.text || '').length;
     const totalChars = body.text_total_chars || shownChars;
-    meta.push(`(truncated: showing ${shownChars.toLocaleString()} of ${totalChars.toLocaleString()} chars)`);
+    meta.push(`truncated ${shownChars.toLocaleString()} / ${totalChars.toLocaleString()} chars`);
   }
-  if ((body.encoding || '').toLowerCase() !== 'utf-8') {
-    const summary = [`(${body.encoding || 'unknown'} body${body.size_bytes ? `, ${body.size_bytes.toLocaleString()} bytes` : ''})`];
-    return meta.concat(summary, text ? [text] : []);
-  }
-  const parsed = tryParseJson(text);
-  if (parsed !== null) {
-    return meta.concat(formatStructuredValue(parsed));
-  }
-  const jsonish = formatJsonishText(text);
-  if (jsonish) {
-    return meta.concat(jsonish);
-  }
-  return meta.concat(formatPlainText(text));
+  return meta;
 }
 
 function tryParseJson(text) {
@@ -1092,212 +1140,6 @@ function tryParseJson(text) {
   } catch (e) {
     return null;
   }
-}
-
-function formatStructuredValue(value, depth = 0) {
-  const pad = '  '.repeat(depth);
-  if (Array.isArray(value)) {
-    if (!value.length) return [`${pad}[]`];
-    return value.flatMap(item => formatListItem(item, depth));
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (!entries.length) return [`${pad}{}`];
-    return entries.flatMap(([key, child]) => formatNamedValue(key, child, depth));
-  }
-  return formatScalarValue(value, depth);
-}
-
-function formatNamedValue(key, value, depth) {
-  const pad = '  '.repeat(depth);
-  if (Array.isArray(value)) {
-    if (!value.length) return [`${pad}${key}: []`];
-    return [`${pad}${key}:`, ...value.flatMap(item => formatListItem(item, depth + 1))];
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (!entries.length) return [`${pad}${key}: {}`];
-    return [`${pad}${key}:`, ...entries.flatMap(([childKey, childValue]) => formatNamedValue(childKey, childValue, depth + 1))];
-  }
-  return formatScalarValue(value, depth, key);
-}
-
-function formatListItem(value, depth) {
-  const pad = '  '.repeat(depth);
-  if (Array.isArray(value)) {
-    if (!value.length) return [`${pad}- []`];
-    return [`${pad}-`, ...value.flatMap(item => formatListItem(item, depth + 1))];
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (!entries.length) return [`${pad}- {}`];
-    return [`${pad}-`, ...entries.flatMap(([key, child]) => formatNamedValue(key, child, depth + 1))];
-  }
-  return formatScalarValue(value, depth, '-', true);
-}
-
-function formatScalarValue(value, depth, label = '', listItem = false) {
-  const pad = '  '.repeat(depth);
-  const prefix = listItem
-    ? `${pad}-`
-    : label
-      ? `${pad}${label}:`
-      : pad;
-
-  if (typeof value === 'string') {
-    const embeddedJson = tryParseEmbeddedJson(value);
-    if (embeddedJson !== null) {
-      const marker = listItem ? `${prefix} <json string>` : `${prefix} <json string>`;
-      return [marker, ...formatStructuredValue(embeddedJson, depth + 1)];
-    }
-    if (value.includes('\n')) {
-      return [`${prefix} |`, ...formatBlockString(value, depth + 1)];
-    }
-    const inline = JSON.stringify(value);
-    return [listItem ? `${prefix} ${inline}` : `${prefix} ${inline}`];
-  }
-
-  const inline = formatInlineScalar(value);
-  return [listItem ? `${prefix} ${inline}` : `${prefix} ${inline}`];
-}
-
-function tryParseEmbeddedJson(value) {
-  const text = String(value || '').trim();
-  if (!text || (text[0] !== '{' && text[0] !== '[')) return null;
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return null;
-  }
-}
-
-function formatJsonishText(text) {
-  const raw = String(text || '');
-  const trimmed = raw.trim();
-  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null;
-
-  const source = raw
-    .replace(/\\r\\n/g, '\n')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\n')
-    .replace(/\\t/g, '  ');
-
-  const lines = [];
-  let current = '';
-  let indent = 0;
-  let inString = false;
-  let escape = false;
-
-  function ensureIndent() {
-    if (!current) current = '  '.repeat(indent);
-  }
-
-  function pushCurrent() {
-    if (!current.trim()) {
-      current = '';
-      return;
-    }
-    lines.push(current.replace(/[ \t]+$/g, ''));
-    current = '';
-  }
-
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-
-    if (inString) {
-      current += ch;
-      if (escape) {
-        escape = false;
-      } else if (ch === '\\') {
-        escape = true;
-      } else if (ch === '"') {
-        inString = false;
-      } else if (ch === '\n') {
-        pushCurrent();
-        current = '  '.repeat(indent + 1);
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      ensureIndent();
-      current += ch;
-      inString = true;
-      continue;
-    }
-
-    if (ch === '{' || ch === '[') {
-      ensureIndent();
-      current += ch;
-      pushCurrent();
-      indent += 1;
-      continue;
-    }
-
-    if (ch === '}' || ch === ']') {
-      pushCurrent();
-      indent = Math.max(0, indent - 1);
-      current = '  '.repeat(indent) + ch;
-      continue;
-    }
-
-    if (ch === ',') {
-      ensureIndent();
-      current += ch;
-      pushCurrent();
-      continue;
-    }
-
-    if (ch === ':') {
-      ensureIndent();
-      current += ': ';
-      continue;
-    }
-
-    if (ch === '\r' || ch === '\n') {
-      pushCurrent();
-      continue;
-    }
-
-    if (ch === ' ' || ch === '\t') {
-      if (current) current += ch;
-      continue;
-    }
-
-    ensureIndent();
-    current += ch;
-  }
-
-  pushCurrent();
-  return lines.length ? lines : null;
-}
-
-function formatBlockString(value, depth) {
-  const pad = '  '.repeat(depth);
-  const lines = String(value).split(/\r?\n/);
-  if (!lines.length) return [`${pad}`];
-  return lines.map(line => `${pad}${line}`);
-}
-
-function formatInlineScalar(value) {
-  if (value === null) return 'null';
-  if (value === undefined) return 'undefined';
-  if (typeof value === 'string') return JSON.stringify(value);
-  return String(value);
-}
-
-function formatPlainText(text) {
-  if (!text) return ['(empty text)'];
-  if (text.includes('\n')) {
-    return ['|', ...formatBlockString(text, 1)];
-  }
-  return [text];
-}
-
-function formatHeaders(headers) {
-  const entries = Object.entries(headers);
-  if (!entries.length) return '(none)';
-  return entries.map(([k, v]) => `${k}: ${v}`).join('\n');
 }
 
 async function copyTrace(id) {

@@ -205,7 +205,7 @@ def _apply_per_token_headers(
         if account_id and not any(
             key.lower() == "chatgpt-account-id" for key in headers
         ):
-            headers["chatgpt-account-id"] = account_id
+            headers["ChatGPT-Account-Id"] = account_id
     return headers
 
 

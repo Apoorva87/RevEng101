@@ -613,19 +613,103 @@
     margin-top: 4px;
   }
   .detail-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
   }
-  .trace-block {
+  .trace-stage {
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 14px;
     background: var(--surface);
     overflow: hidden;
     min-width: 0;
   }
-  .trace-block.full { grid-column: 1 / -1; }
+  .trace-stage-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    background: rgba(255,255,255,0.02);
+  }
+  .trace-stage-kicker {
+    color: var(--text2);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .trace-stage-title {
+    margin-top: 4px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+  .trace-stage-meta-list {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .trace-pill {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text2);
+    font-family: var(--font);
+    font-size: 10px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .trace-stage-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+  }
+  .trace-attempt-shell {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface2);
+    overflow: hidden;
+  }
+  .trace-attempt-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    background: rgba(255,255,255,0.02);
+  }
+  .trace-attempt-label {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .trace-attempt-subtle {
+    color: var(--text2);
+    font-family: var(--font);
+    font-size: 11px;
+  }
+  .trace-attempt-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 16px;
+  }
+  .trace-block {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    overflow: hidden;
+    min-width: 0;
+  }
   details.trace-block > summary { list-style: none; cursor: pointer; user-select: none; }
   details.trace-block > summary::-webkit-details-marker { display: none; }
   .trace-title {
@@ -637,6 +721,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    background: rgba(255,255,255,0.02);
   }
   details.trace-block > summary.trace-title::before {
     content: '▼';
@@ -658,7 +743,7 @@
   }
   .trace-pre {
     padding: 12px;
-    max-height: 360px;
+    max-height: 420px;
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -667,13 +752,21 @@
     font-size: 11px;
     line-height: 1.45;
   }
-  .trace-attempt {
-    border-top: 1px solid var(--border);
-    padding-top: 6px;
+  .trace-pre.trace-empty {
+    opacity: 0.75;
   }
   @media (max-width: 860px) {
-    .detail-grid { grid-template-columns: 1fr; }
-    .trace-block.full { grid-column: auto; }
+    .trace-stage-head,
+    .trace-attempt-head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .trace-stage-meta-list {
+      justify-content: flex-start;
+    }
+    .trace-attempt-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   @media (max-width: 1120px) {
@@ -764,7 +857,7 @@
   }
   .json-tree .json-formatter-row { font-family: var(--font); }
   .json-tree .json-formatter-key { color: var(--blue, #60a5fa); font-weight: 600; margin-right: 4px; }
-  .json-tree .json-formatter-string { color: var(--green); word-break: break-word; }
+  .json-tree .json-formatter-string { color: var(--green); word-break: break-word; white-space: pre-wrap; }
   .json-tree .json-formatter-number { color: var(--orange); }
   .json-tree .json-formatter-boolean { color: var(--orange); font-weight: 600; }
   .json-tree .json-formatter-null { color: var(--text2); font-style: italic; }

@@ -125,3 +125,42 @@ async def test_trace_store_prunes_old_disk_entries(tmp_path):
         "attempts": [],
         "final": {"status": 200},
     }
+
+
+@pytest.mark.asyncio
+async def test_trace_store_clear_removes_memory_and_disk_entries(tmp_path):
+    trace_root = tmp_path / "logs"
+    trace_store = TraceStore(trace_root, max_entries=10)
+    await trace_store.init()
+
+    log_entry = {
+        "id": "req-clear",
+        "timestamp": "2026-04-19T18:13:55Z",
+        "method": "POST",
+        "path": "/openai/v1/chat/completions",
+        "provider": "openai",
+        "token_used": "codex",
+        "status": 200,
+        "elapsed_ms": 45,
+        "client": "127.0.0.1",
+        "has_detail": True,
+        "attempts": 1,
+    }
+    trace = {
+        "id": "req-clear",
+        "incoming": {"method": "POST"},
+        "attempts": [],
+        "final": {"status": 200},
+    }
+
+    trace_store.record(log_entry, trace)
+    await trace_store.persist(log_entry, trace)
+
+    cleared = await trace_store.clear()
+
+    assert cleared == 1
+    assert trace_store.root == trace_root
+    assert trace_store.list_logs() == []
+    assert await trace_store.get_detail("req-clear") is None
+    assert not (trace_root / "requests.jsonl").exists()
+    assert list((trace_root / "requests").glob("*.json")) == []
