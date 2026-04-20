@@ -61,6 +61,16 @@ class TraceStore:
         async with self._persist_lock:
             await asyncio.to_thread(self._persist_sync, log_entry, trace)
 
+    async def clear(self) -> int:
+        """Remove all traces from memory and disk; return the number of deleted entries."""
+        async with self._persist_lock:
+            return await asyncio.to_thread(self._clear_sync)
+
+    @property
+    def root(self) -> Path:
+        """Return the on-disk directory where traces are stored."""
+        return self._root
+
     def _init_sync(self) -> None:
         self._detail_dir.mkdir(parents=True, exist_ok=True)
         self._load_recent_sync()
@@ -130,6 +140,18 @@ class TraceStore:
             with self._index_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(log_entry, separators=(",", ":")))
                 handle.write("\n")
+
+    def _clear_sync(self) -> int:
+        removed = len(self._disk_entries) or len(self._recent)
+        self._recent.clear()
+        self._disk_entries.clear()
+        self._details.clear()
+        if self._index_path.exists():
+            self._index_path.unlink()
+        if self._detail_dir.exists():
+            for path in self._detail_dir.glob("*.json"):
+                path.unlink(missing_ok=True)
+        return removed
 
     def _prune_memory(self) -> None:
         valid_ids = {entry["id"] for entry in self._recent}

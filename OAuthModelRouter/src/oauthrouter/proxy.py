@@ -14,6 +14,7 @@ from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
 from oauthrouter.models import AppConfig, ProviderConfig, Token
+from oauthrouter.openai_helpers import resolve_openai_account_id
 from oauthrouter.rate_limits import rate_limit_snapshot_from_headers
 from oauthrouter.token_manager import (
     NoHealthyTokensError,
@@ -193,6 +194,21 @@ def _inject_auth(
     return headers
 
 
+def _apply_per_token_headers(
+    headers: dict[str, str],
+    provider_name: str,
+    token: Token,
+) -> dict[str, str]:
+    """Inject headers that depend on the selected token (e.g. ChatGPT-Account-Id)."""
+    if provider_name == "openai":
+        account_id = resolve_openai_account_id(token)
+        if account_id and not any(
+            key.lower() == "chatgpt-account-id" for key in headers
+        ):
+            headers["chatgpt-account-id"] = account_id
+    return headers
+
+
 def _prepare_forwarded_headers(request: Request) -> dict[str, str]:
     """Extract request headers, filtering out hop-by-hop headers."""
     return {
@@ -344,6 +360,7 @@ async def forward_request(
     )
     headers = _prepare_forwarded_headers(request)
     headers = _inject_auth(headers, token, provider_config)
+    headers = _apply_per_token_headers(headers, provider, token)
     body = await request.body()
 
     if trace is not None:
@@ -427,6 +444,7 @@ async def forward_request(
 
         headers = _prepare_forwarded_headers(request)
         headers = _inject_auth(headers, token, provider_config)
+        headers = _apply_per_token_headers(headers, provider, token)
         logger.info(
             "[%s] Retrying after 429 with token=%s → %s",
             request_id,
@@ -477,6 +495,7 @@ async def forward_request(
         # Retry with the new token
         headers = _prepare_forwarded_headers(request)
         headers = _inject_auth(headers, next_token, provider_config)
+        headers = _apply_per_token_headers(headers, provider, next_token)
         upstream_url = _build_upstream_url(
             provider_config, path, request.url.query or ""
         )

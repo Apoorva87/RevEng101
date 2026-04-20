@@ -412,6 +412,26 @@ async def api_get_logs(request: Request) -> JSONResponse:
     return JSONResponse(services.trace_store.list_logs())
 
 
+@router.get("/api/logs/info")
+async def api_get_logs_info(request: Request) -> JSONResponse:
+    """Return metadata about the on-disk trace store (path + counts)."""
+    services = get_app_services(request)
+    return JSONResponse(
+        {
+            "log_dir": str(services.trace_store.root),
+            "count": len(services.trace_store.list_logs()),
+        }
+    )
+
+
+@router.delete("/api/logs")
+async def api_clear_logs(request: Request) -> JSONResponse:
+    """Clear all proxy request traces from memory and disk."""
+    services = get_app_services(request)
+    removed = await services.trace_store.clear()
+    return JSONResponse({"ok": True, "cleared": removed})
+
+
 @router.get("/api/logs/{log_id}")
 async def api_get_log_detail(log_id: str, request: Request) -> JSONResponse:
     """Return the captured request/response trace for a proxy request."""

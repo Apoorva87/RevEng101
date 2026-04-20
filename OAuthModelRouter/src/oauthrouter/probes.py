@@ -10,6 +10,7 @@ from typing import Any, Optional
 import httpx
 
 from oauthrouter.models import AppConfig, ProviderConfig, Token, TokenStatus
+from oauthrouter.openai_helpers import resolve_openai_account_id
 from oauthrouter.proxy import _inject_auth
 from oauthrouter.rate_limits import openai_usage_ok, openai_usage_snapshot
 from oauthrouter.rate_limit_store import RateLimitStore
@@ -26,38 +27,6 @@ PROBE_MODELS = {
 }
 
 OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
-
-
-def decode_jwt_claims(jwt_token: str) -> dict[str, Any]:
-    """Decode a JWT payload without verifying the signature."""
-    import base64
-
-    parts = jwt_token.split(".")
-    if len(parts) != 3:
-        return {}
-
-    payload = parts[1] + "=" * (-len(parts[1]) % 4)
-    try:
-        decoded = base64.urlsafe_b64decode(payload)
-        claims = json.loads(decoded)
-    except Exception:
-        return {}
-    return claims if isinstance(claims, dict) else {}
-
-
-def resolve_openai_account_id(token: Token) -> Optional[str]:
-    """Get the ChatGPT account header value for a Codex/ChatGPT OAuth token."""
-    if token.account_id:
-        return token.account_id
-
-    claims = decode_jwt_claims(token.access_token)
-    auth_info = claims.get("https://api.openai.com/auth", {})
-    if isinstance(auth_info, dict):
-        for field in ("chatgpt_user_id", "user_id", "account_id", "chatgpt_account_id"):
-            value = auth_info.get(field)
-            if isinstance(value, str) and value:
-                return value
-    return None
 
 
 def probe_request_for_token(

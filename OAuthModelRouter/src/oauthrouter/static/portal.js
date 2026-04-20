@@ -4,6 +4,7 @@ let providerTestState = {};
 let providerSelections = {};
 let editingProviderName = null;
 let refreshAllPending = false;
+let dashboardInterval = null;
 
 function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
@@ -778,6 +779,7 @@ function switchPage(page) {
     setEndpointPorts();
   } else {
     stopLogPolling();
+    loadTokens();
   }
 }
 
@@ -789,6 +791,18 @@ async function loadLogs() {
     const logs = await api('/api/logs');
     renderLogs(logs);
   } catch(e) {}
+  refreshLogDirHint();
+}
+
+async function refreshLogDirHint() {
+  const el = document.getElementById('logs-dir-hint');
+  if (!el) return;
+  try {
+    const info = await api('/api/logs/info', { suppressErrorToast: true });
+    el.textContent = info.log_dir ? `Stored in ${info.log_dir}` : '';
+  } catch (e) {
+    el.textContent = '';
+  }
 }
 
 function renderLogs(logs) {
@@ -839,6 +853,87 @@ function renderLogDetail(detail) {
     : '';
   const tokenUsed = lastAttempt ? lastAttempt.token_id || 'unknown' : '—';
   const statusClass = final.status < 300 ? 'status-2xx' : final.status < 500 ? 'status-4xx' : 'status-5xx';
+
+  const pendingTrees = [];
+  const bodyBlock = (title, bodyObj, { full = false, open = true } = {}) => {
+    const bodyInfo = bodyObj || {};
+    const text = bodyInfo.text || '';
+    const parsed = tryParseJson(text);
+    const extraClass = full ? ' full' : '';
+    const openAttr = open ? ' open' : '';
+    const meta = [];
+    if (bodyInfo.text_truncated) {
+      const shown = text.length;
+      const total = bodyInfo.text_total_chars || shown;
+      meta.push(`truncated: showing ${shown.toLocaleString()} of ${total.toLocaleString()} chars`);
+    }
+    if (bodyInfo.size_bytes) {
+      meta.push(`${bodyInfo.size_bytes.toLocaleString()} bytes`);
+    }
+    const metaHtml = meta.length
+      ? `<span class="trace-meta">${esc(meta.join(' · '))}</span>`
+      : '';
+    if (parsed !== null && typeof parsed === 'object') {
+      const id = `json-tree-${pendingTrees.length}`;
+      pendingTrees.push({ id, value: parsed });
+      return `
+        <details class="trace-block${extraClass}"${openAttr}>
+          <summary class="trace-title">
+            <span>${esc(title)}</span>
+            ${metaHtml}
+          </summary>
+          <div class="json-tree" id="${id}"></div>
+        </details>`;
+    }
+    const lines = formatResponseBodyLines({ body: bodyInfo });
+    const html = lines.map(l => {
+      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
+      return `<div class="diff-line">${esc(l)}</div>`;
+    }).join('');
+    return `
+      <details class="trace-block${extraClass}"${openAttr}>
+        <summary class="trace-title">
+          <span>${esc(title)}</span>
+          ${metaHtml}
+        </summary>
+        <div class="trace-pre diff-pre">${html}</div>
+      </details>`;
+  };
+
+  const headersDiffBlock = (leftTitle, rightTitle, leftReq, rightReq) => {
+    const left = formatRequestHeaderLines(leftReq);
+    const right = formatRequestHeaderLines(rightReq);
+    const leftSet = new Set(left);
+    const rightSet = new Set(right);
+    const renderSide = (lines, otherSet, diffCls) => lines.map(l => {
+      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
+      const cls = !otherSet.has(l) ? ` ${diffCls}` : '';
+      return `<div class="diff-line${cls}">${esc(l)}</div>`;
+    }).join('');
+    return `
+      <details class="trace-block" open>
+        <summary class="trace-title"><span>${esc(leftTitle)}</span></summary>
+        <div class="trace-pre diff-pre">${renderSide(left, rightSet, 'diff-removed')}</div>
+      </details>
+      <details class="trace-block" open>
+        <summary class="trace-title"><span>${esc(rightTitle)}</span></summary>
+        <div class="trace-pre diff-pre">${renderSide(right, leftSet, 'diff-added')}</div>
+      </details>`;
+  };
+
+  const headersBlock = (title, res) => {
+    const lines = formatResponseHeaderLines(res);
+    const html = lines.map(l => {
+      if (l === '' || l.startsWith('──')) return `<div class="diff-sep">${esc(l)}</div>`;
+      return `<div class="diff-line">${esc(l)}</div>`;
+    }).join('');
+    return `
+      <details class="trace-block full" open>
+        <summary class="trace-title"><span>${esc(title)}</span></summary>
+        <div class="trace-pre diff-pre">${html}</div>
+      </details>`;
+  };
+
   panel.innerHTML = `
     <div class="detail-header">
       <div>
@@ -857,13 +952,43 @@ function renderLogDetail(detail) {
       return `
         ${attempts.length > 1 ? `<div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text2);background:var(--surface2)">Attempt ${i + 1} · Token: ${esc(a.token_id || 'unknown')}</div>` : ''}
         <div class="detail-grid">
-          ${diffBlock('Request In', 'Request Out', formatRequestLines(incoming), formatRequestLines(req))}
-          ${plainBlock('Response Headers', formatResponseHeaderLines(res))}
-          ${plainBlock('Response Body', formatResponseBodyLines(res))}
+          ${headersDiffBlock('Request Headers (In)', 'Request Headers (Out)', incoming, req)}
+          ${bodyBlock('Request Body', req.body, { full: true })}
+          ${headersBlock('Response Headers', res)}
+          ${bodyBlock('Response Body', res.body, { full: true })}
         </div>`;
     }).join('')}
     ${!attempts.length ? `<div class="detail-grid">${traceBlock('Incoming Request', formatRequestLines(incoming).join('\\n'), 'full')}</div>` : ''}`;
+
+  pendingTrees.forEach(({ id, value }) => mountJsonTree(id, value));
   panel.dataset.trace = JSON.stringify(detail, null, 2);
+}
+
+function formatRequestHeaderLines(req) {
+  if (!req || !Object.keys(req).length) return ['(no data)'];
+  const lines = [`${req.method || '?'} ${req.url || req.path || ''}`];
+  lines.push('── Headers ──────────────────────────');
+  for (const [k, v] of Object.entries(req.headers || {})) lines.push(`${k}: ${v}`);
+  if (!Object.keys(req.headers || {}).length) lines.push('(none)');
+  return lines;
+}
+
+function mountJsonTree(elementId, value) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (typeof JSONFormatter === 'undefined') {
+    const pre = document.createElement('pre');
+    pre.className = 'json-tree-fallback';
+    pre.textContent = JSON.stringify(value, null, 2);
+    el.appendChild(pre);
+    return;
+  }
+  const formatter = new JSONFormatter(value, 2, {
+    theme: 'dark',
+    hoverPreviewEnabled: true,
+    hoverPreviewArrayCount: 50,
+  });
+  el.appendChild(formatter.render());
 }
 
 function diffBlock(leftTitle, rightTitle, leftLines, rightLines) {
@@ -938,13 +1063,235 @@ function formatResponseBodyLines(res) {
 function formatBodyLines(body) {
   if (!body || body.is_empty) return ['(empty)'];
   const text = body.text || '';
-  if ((body.encoding || '').toLowerCase() !== 'utf-8') return [text];
-  try {
-    const pretty = JSON.stringify(JSON.parse(text), null, 2);
-    return pretty.split('\n');
-  } catch (e) {
-    return text.split('\n');
+  const meta = [];
+  if (body.text_truncated) {
+    const shownChars = text.length;
+    const totalChars = body.text_total_chars || shownChars;
+    meta.push(`(truncated: showing ${shownChars.toLocaleString()} of ${totalChars.toLocaleString()} chars)`);
   }
+  if ((body.encoding || '').toLowerCase() !== 'utf-8') {
+    const summary = [`(${body.encoding || 'unknown'} body${body.size_bytes ? `, ${body.size_bytes.toLocaleString()} bytes` : ''})`];
+    return meta.concat(summary, text ? [text] : []);
+  }
+  const parsed = tryParseJson(text);
+  if (parsed !== null) {
+    return meta.concat(formatStructuredValue(parsed));
+  }
+  const jsonish = formatJsonishText(text);
+  if (jsonish) {
+    return meta.concat(jsonish);
+  }
+  return meta.concat(formatPlainText(text));
+}
+
+function tryParseJson(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatStructuredValue(value, depth = 0) {
+  const pad = '  '.repeat(depth);
+  if (Array.isArray(value)) {
+    if (!value.length) return [`${pad}[]`];
+    return value.flatMap(item => formatListItem(item, depth));
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) return [`${pad}{}`];
+    return entries.flatMap(([key, child]) => formatNamedValue(key, child, depth));
+  }
+  return formatScalarValue(value, depth);
+}
+
+function formatNamedValue(key, value, depth) {
+  const pad = '  '.repeat(depth);
+  if (Array.isArray(value)) {
+    if (!value.length) return [`${pad}${key}: []`];
+    return [`${pad}${key}:`, ...value.flatMap(item => formatListItem(item, depth + 1))];
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) return [`${pad}${key}: {}`];
+    return [`${pad}${key}:`, ...entries.flatMap(([childKey, childValue]) => formatNamedValue(childKey, childValue, depth + 1))];
+  }
+  return formatScalarValue(value, depth, key);
+}
+
+function formatListItem(value, depth) {
+  const pad = '  '.repeat(depth);
+  if (Array.isArray(value)) {
+    if (!value.length) return [`${pad}- []`];
+    return [`${pad}-`, ...value.flatMap(item => formatListItem(item, depth + 1))];
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) return [`${pad}- {}`];
+    return [`${pad}-`, ...entries.flatMap(([key, child]) => formatNamedValue(key, child, depth + 1))];
+  }
+  return formatScalarValue(value, depth, '-', true);
+}
+
+function formatScalarValue(value, depth, label = '', listItem = false) {
+  const pad = '  '.repeat(depth);
+  const prefix = listItem
+    ? `${pad}-`
+    : label
+      ? `${pad}${label}:`
+      : pad;
+
+  if (typeof value === 'string') {
+    const embeddedJson = tryParseEmbeddedJson(value);
+    if (embeddedJson !== null) {
+      const marker = listItem ? `${prefix} <json string>` : `${prefix} <json string>`;
+      return [marker, ...formatStructuredValue(embeddedJson, depth + 1)];
+    }
+    if (value.includes('\n')) {
+      return [`${prefix} |`, ...formatBlockString(value, depth + 1)];
+    }
+    const inline = JSON.stringify(value);
+    return [listItem ? `${prefix} ${inline}` : `${prefix} ${inline}`];
+  }
+
+  const inline = formatInlineScalar(value);
+  return [listItem ? `${prefix} ${inline}` : `${prefix} ${inline}`];
+}
+
+function tryParseEmbeddedJson(value) {
+  const text = String(value || '').trim();
+  if (!text || (text[0] !== '{' && text[0] !== '[')) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatJsonishText(text) {
+  const raw = String(text || '');
+  const trimmed = raw.trim();
+  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null;
+
+  const source = raw
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\t/g, '  ');
+
+  const lines = [];
+  let current = '';
+  let indent = 0;
+  let inString = false;
+  let escape = false;
+
+  function ensureIndent() {
+    if (!current) current = '  '.repeat(indent);
+  }
+
+  function pushCurrent() {
+    if (!current.trim()) {
+      current = '';
+      return;
+    }
+    lines.push(current.replace(/[ \t]+$/g, ''));
+    current = '';
+  }
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (inString) {
+      current += ch;
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      } else if (ch === '\n') {
+        pushCurrent();
+        current = '  '.repeat(indent + 1);
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      ensureIndent();
+      current += ch;
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{' || ch === '[') {
+      ensureIndent();
+      current += ch;
+      pushCurrent();
+      indent += 1;
+      continue;
+    }
+
+    if (ch === '}' || ch === ']') {
+      pushCurrent();
+      indent = Math.max(0, indent - 1);
+      current = '  '.repeat(indent) + ch;
+      continue;
+    }
+
+    if (ch === ',') {
+      ensureIndent();
+      current += ch;
+      pushCurrent();
+      continue;
+    }
+
+    if (ch === ':') {
+      ensureIndent();
+      current += ': ';
+      continue;
+    }
+
+    if (ch === '\r' || ch === '\n') {
+      pushCurrent();
+      continue;
+    }
+
+    if (ch === ' ' || ch === '\t') {
+      if (current) current += ch;
+      continue;
+    }
+
+    ensureIndent();
+    current += ch;
+  }
+
+  pushCurrent();
+  return lines.length ? lines : null;
+}
+
+function formatBlockString(value, depth) {
+  const pad = '  '.repeat(depth);
+  const lines = String(value).split(/\r?\n/);
+  if (!lines.length) return [`${pad}`];
+  return lines.map(line => `${pad}${line}`);
+}
+
+function formatInlineScalar(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return JSON.stringify(value);
+  return String(value);
+}
+
+function formatPlainText(text) {
+  if (!text) return ['(empty text)'];
+  if (text.includes('\n')) {
+    return ['|', ...formatBlockString(text, 1)];
+  }
+  return [text];
 }
 
 function formatHeaders(headers) {
@@ -976,11 +1323,25 @@ function stopLogPolling() {
   if (logInterval) { clearInterval(logInterval); logInterval = null; }
 }
 
-function clearLogsView() {
-  document.getElementById('logs-body').innerHTML =
-    '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:40px">Cleared. New requests will appear here.</td></tr>';
-  document.getElementById('log-detail').innerHTML =
-    '<div class="empty-state">Select a request to inspect headers and payloads.</div>';
+function startDashboardPolling() {
+  if (dashboardInterval) return;
+  dashboardInterval = setInterval(() => {
+    if (document.hidden) return;
+    if (document.getElementById('page-tokens')?.classList.contains('active')) loadTokens();
+  }, 3000);
+}
+
+async function clearLogsView() {
+  if (!confirm('Delete all stored request traces from disk and memory?')) return;
+  try {
+    const result = await api('/api/logs', { method: 'DELETE' });
+    document.getElementById('logs-body').innerHTML =
+      '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:40px">Cleared. New requests will appear here.</td></tr>';
+    document.getElementById('log-detail').innerHTML =
+      '<div class="empty-state">Select a request to inspect headers and payloads.</div>';
+    toast(`Cleared ${result.cleared ?? 0} request traces`);
+    refreshLogDirHint();
+  } catch (e) {}
 }
 
 // ─── Token enable/disable ───────────────────────────────────
@@ -1053,7 +1414,10 @@ async function saveEditToken() {
 }
 
 // ─── Init ────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', loadTokens);
+document.addEventListener('DOMContentLoaded', () => {
+  loadTokens();
+  startDashboardPolling();
+});
 
 // Close modal on overlay click
 document.getElementById('add-modal').addEventListener('click', e => {
