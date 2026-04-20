@@ -281,9 +281,18 @@ def _resolve_window(
 
 
 def _normalize_usage_event(provider_id: str, raw: dict[str, Any]) -> dict[str, Any] | None:
-    ts = _event_timestamp(raw.get("timestamp"))
+    ts = _event_timestamp(raw.get("timestamp") or raw.get("ts"))
     if ts is None:
         return None
+    # Claude analyzer flattens the usage fields onto the row; Codex nests them
+    # under "usage". Accept either shape.
+    usage_raw = raw.get("usage")
+    if not isinstance(usage_raw, dict):
+        usage_raw = {k: raw.get(k) for k in (
+            "input_tokens", "output_tokens",
+            "cache_read_input_tokens", "cache_creation_input_tokens",
+            "reasoning_output_tokens", "cached_tokens",
+        ) if raw.get(k) is not None}
     project_name = str(raw.get("project_name") or raw.get("project") or "(unknown)")
     project_path = str(raw.get("project_path") or raw.get("cwd") or project_name)
     return {
@@ -295,12 +304,12 @@ def _normalize_usage_event(provider_id: str, raw: dict[str, Any]) -> dict[str, A
         "project_path": project_path,
         "account_key": str(raw.get("account_key") or "unknown"),
         "account_label": str(raw.get("account_label") or "Unknown"),
-        "usage": _normalize_usage(raw.get("usage") or {}),
+        "usage": _normalize_usage(usage_raw),
     }
 
 
 def _normalize_limit_event(provider_id: str, raw: dict[str, Any]) -> dict[str, Any] | None:
-    ts = _event_timestamp(raw.get("timestamp"))
+    ts = _event_timestamp(raw.get("timestamp") or raw.get("ts"))
     if ts is None:
         return None
     project_name = str(raw.get("project_name") or raw.get("project") or "(unknown)")

@@ -29,9 +29,13 @@ class NormalizedSession:
     total_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     user_messages: int = 0
     assistant_messages: int = 0
     tool_uses: int = 0
+    subagent_count: int = 0
+    subagent_tokens: int = 0
     last_prompt: str | None = None
     last_error: str | None = None
     resume_command: str | None = None

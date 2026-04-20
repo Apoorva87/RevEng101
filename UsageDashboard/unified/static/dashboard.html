@@ -38,6 +38,7 @@
       <div class="workspace-tabs" id="workspace-tabs">
         <button class="pill active" data-view="sessions">Sessions</button>
         <button class="pill" data-view="usage">Usage</button>
+        <button class="pill" data-view="projects">Projects</button>
       </div>
       <div class="usage-controls hidden" id="usage-controls">
         <div class="pills" id="usage-preset-pills">
@@ -139,6 +140,27 @@
         </div>
       </div>
     </div>
+
+    <div class="view-panel hidden" id="projects-view">
+      <div class="table-wrap">
+        <table id="projects-table">
+          <thead><tr id="projects-head">
+            <th data-pkey="project">Project</th>
+            <th data-pkey="providers">Providers</th>
+            <th data-pkey="sessions">Sessions</th>
+            <th data-pkey="total_tokens" class="sorted-desc">Total</th>
+            <th data-pkey="input_tokens">Input</th>
+            <th data-pkey="output_tokens">Output</th>
+            <th data-pkey="cache_read_tokens">Cache Read</th>
+            <th data-pkey="cache_creation_tokens">Cache Create</th>
+            <th data-pkey="subagent_count">Subagents</th>
+            <th data-pkey="subagent_tokens">Subagent Tok</th>
+            <th data-pkey="last_activity_at">Last Activity</th>
+          </tr></thead>
+          <tbody id="projects-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <div class="panel-resize-handle hidden detail-resize-handle" id="detail-resize-handle" title="Drag to resize details"></div>
@@ -156,6 +178,9 @@
   var usageRangeData = null;
   var usageRangeRequestKey = "";
   var usageRangeLoading = false;
+  var projectsData = null;
+  var projectsSortKey = "total_tokens";
+  var projectsSortDir = "desc";
   var selectedProvider = "all";
   var searchText = "";
   var sortKey = "last_activity_at";
@@ -450,6 +475,9 @@
       await fetchData();
       if(currentView === "usage"){
         await fetchUsageData();
+      } else if(currentView === "projects"){
+        await fetchProjects();
+        renderProjectsView();
       } else {
         document.getElementById("error-banner").innerHTML = "";
       }
@@ -560,6 +588,7 @@
 
   function isInactive(s){
     var ts = s.last_activity_at || 0;
+    if(!ts && s.extra && s.extra.file_mtime) ts = s.extra.file_mtime;
     return ts > 0 && (Date.now() / 1000 - ts) > getInactivityDays() * 86400;
   }
 
@@ -569,7 +598,8 @@
       return rowMatchesSearch([s.provider, s.session_id, s.display_label, s.project_name, s.state, s.account_label, s.working_path]);
     }).map(function(s){
       s = Object.assign({}, s);
-      if(isInactive(s) && s.state_category === "idle"){
+      // Flag any non-running session older than threshold. Backend deletes the same set.
+      if(isInactive(s) && s.state_category !== "running"){
         s._inactive = true;
         s._orig_state = s.state;
         s.state = "inactive";
@@ -1553,10 +1583,13 @@
       ["Duration", session.duration_seconds ? Math.round(session.duration_seconds / 60) + "m" : "\u2014"],
       ["Input", compact(session.input_tokens)],
       ["Output", compact(session.output_tokens)],
+      ["Cache Read", compact(session.cache_read_tokens)],
+      ["Cache Create", compact(session.cache_creation_tokens)],
       ["Total", compact(session.total_tokens)],
       ["User Msgs", String(session.user_messages)],
       ["Asst Msgs", String(session.assistant_messages)],
       ["Tools", String(session.tool_uses)],
+      ["Subagents", session.subagent_count ? session.subagent_count + " (" + compact(session.subagent_tokens) + " tok)" : "\u2014"],
       ["Last Prompt", session.last_prompt || "\u2014"],
       ["Last Error", session.last_error || "\u2014"]
     ];
@@ -1569,12 +1602,38 @@
         U.escHtml(session.resume_command) +
         ' <button class="cmd-copy" data-inline-copy="' + U.escHtml(session.resume_command) + '">copy</button></div></div>';
     }
+    html += '<div class="detail-field" style="grid-column:1/-1"><div class="dlabel">Prompts</div><div class="dvalue">' +
+      '<button class="cmd-copy" data-show-prompts="' + U.escHtml(session.session_id) + '">View all prompts</button>' +
+      '<div id="prompt-list" style="margin-top:8px"></div></div></div>';
     html += '</div>';
     panel.innerHTML = html;
     panel.querySelectorAll("[data-inline-copy]").forEach(function(btn){
       btn.onclick = function(){ U.copyText(btn.dataset.inlineCopy, btn); };
     });
+    panel.querySelectorAll("[data-show-prompts]").forEach(function(btn){
+      btn.onclick = function(){ loadPromptList(btn.dataset.showPrompts); };
+    });
     applyLayoutState();
+  }
+
+  function loadPromptList(sessionId){
+    var container = document.getElementById("prompt-list");
+    if(!container) return;
+    container.textContent = "Loading…";
+    fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/prompts")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ container.textContent = "Error: " + d.error; return; }
+        var prompts = d.prompts || [];
+        if(!prompts.length){ container.textContent = "No human prompts captured."; return; }
+        var html = '<div class="prompt-list">' + prompts.map(function(p, i){
+          var ts = p.timestamp ? (String(p.timestamp).slice(0,19).replace("T"," ")) : "";
+          return '<div class="prompt-item"><div class="dlabel">#' + (i+1) + ' ' + U.escHtml(ts) + '</div>' +
+                 '<div class="mono" style="white-space:pre-wrap">' + U.escHtml(p.text) + '</div></div>';
+        }).join("") + '</div>';
+        container.innerHTML = html;
+      })
+      .catch(function(e){ container.textContent = "Fetch failed: " + e; });
   }
 
   function renderDetail(){
@@ -1588,21 +1647,94 @@
   function renderCurrentView(){
     document.getElementById("sessions-view").classList.toggle("hidden", currentView !== "sessions");
     document.getElementById("usage-view").classList.toggle("hidden", currentView !== "usage");
+    document.getElementById("projects-view").classList.toggle("hidden", currentView !== "projects");
     document.getElementById("usage-controls").classList.toggle("hidden", currentView !== "usage");
     document.getElementById("bulk-delete-slot").style.display = currentView === "sessions" ? "" : "none";
-    document.getElementById("search").placeholder = currentView === "sessions"
-      ? "Filter sessions… (provider, project, state, session id)"
-      : "Filter timeline breakdown… (project, session, marker)";
+    var placeholders = {
+      sessions: "Filter sessions… (provider, project, state, session id)",
+      usage: "Filter timeline breakdown… (project, session, marker)",
+      projects: "Filter projects… (name, provider)"
+    };
+    document.getElementById("search").placeholder = placeholders[currentView] || "";
     document.querySelectorAll("#workspace-tabs [data-view]").forEach(function(btn){
       btn.classList.toggle("active", btn.dataset.view === currentView);
     });
 
     if(currentView === "usage"){
       renderUsageView();
+    } else if(currentView === "projects"){
+      renderProjectsView();
     } else {
       renderSessionsView();
     }
     applyLayoutState();
+  }
+
+  async function fetchProjects(){
+    var r = await fetch("/api/projects");
+    if(!r.ok) throw new Error("projects HTTP " + r.status);
+    projectsData = await r.json();
+    return projectsData;
+  }
+
+  function sortProjects(rows){
+    var k = projectsSortKey;
+    var dir = projectsSortDir === "desc" ? -1 : 1;
+    return rows.slice().sort(function(a, b){
+      var av = a[k], bv = b[k];
+      if(k === "providers") { av = (av||[]).join(","); bv = (bv||[]).join(","); }
+      if(typeof av === "string" || typeof bv === "string"){
+        av = String(av||"").toLowerCase(); bv = String(bv||"").toLowerCase();
+        return av < bv ? -dir : av > bv ? dir : 0;
+      }
+      return ((av||0) - (bv||0)) * dir;
+    });
+  }
+
+  function renderProjectsView(){
+    var tbody = document.getElementById("projects-body");
+    if(!projectsData){
+      tbody.innerHTML = '<tr><td colspan="11" class="empty">Loading…</td></tr>';
+      return;
+    }
+    var rows = (projectsData.projects || []).filter(function(p){
+      if(!searchText) return true;
+      var q = searchText.toLowerCase();
+      return p.project.toLowerCase().includes(q) ||
+        (p.providers || []).some(function(pr){ return pr.includes(q); });
+    });
+    rows = sortProjects(rows);
+    if(!rows.length){
+      tbody.innerHTML = '<tr><td colspan="11" class="empty">No projects found</td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(function(p){
+        var providers = (p.providers || []).map(function(pr){
+          return '<span class="provider-badge ' + U.escHtml(pr) + '">' + U.escHtml(pr) + '</span>';
+        }).join(" ");
+        return '<tr class="project-row" data-project="' + U.escHtml(p.project) + '">' +
+          '<td>' + U.escHtml(p.project) + '</td>' +
+          '<td>' + providers + '</td>' +
+          '<td>' + compact(p.sessions) + '</td>' +
+          '<td><strong>' + compact(p.total_tokens) + '</strong></td>' +
+          '<td>' + compact(p.input_tokens) + '</td>' +
+          '<td>' + compact(p.output_tokens) + '</td>' +
+          '<td>' + compact(p.cache_read_tokens) + '</td>' +
+          '<td>' + compact(p.cache_creation_tokens) + '</td>' +
+          '<td>' + compact(p.subagent_count) + '</td>' +
+          '<td>' + compact(p.subagent_tokens) + '</td>' +
+          '<td>' + U.relTime(p.last_activity_at) + '</td>' +
+          '</tr>';
+      }).join("");
+    }
+    tbody.querySelectorAll("tr.project-row").forEach(function(row){
+      row.onclick = function(){
+        searchText = row.dataset.project;
+        document.getElementById("search").value = searchText;
+        currentView = "sessions";
+        renderCurrentView();
+      };
+    });
+    U.initColumnResize(document.getElementById("projects-table"));
   }
 
   document.getElementById("table-head").querySelectorAll("th[data-key]").forEach(function(th){
@@ -1630,14 +1762,28 @@
     btn.onclick = async function(){
       currentView = btn.dataset.view;
       if(currentView === "usage" && !usageData){
-        try{
-          await fetchUsageData();
-        }catch(e){
-          setErrorBanner(String(e));
-        }
+        try{ await fetchUsageData(); }
+        catch(e){ setErrorBanner(String(e)); }
+      } else if(currentView === "projects"){
+        try{ await fetchProjects(); }
+        catch(e){ setErrorBanner(String(e)); }
+        renderCurrentView();
       } else {
         renderCurrentView();
       }
+    };
+  });
+
+  document.getElementById("projects-head").querySelectorAll("th[data-pkey]").forEach(function(th){
+    th.onclick = function(){
+      var key = th.dataset.pkey;
+      if(projectsSortKey === key) projectsSortDir = projectsSortDir === "desc" ? "asc" : "desc";
+      else { projectsSortKey = key; projectsSortDir = "desc"; }
+      document.querySelectorAll("#projects-head th").forEach(function(h){
+        h.classList.remove("sorted-asc", "sorted-desc");
+      });
+      th.classList.add(projectsSortDir === "desc" ? "sorted-desc" : "sorted-asc");
+      renderProjectsView();
     };
   });
 

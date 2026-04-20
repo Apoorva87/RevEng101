@@ -357,15 +357,26 @@ class CodexSessionApp:
         agent_messages = sum(1 for m in messages if m.get("role") == "assistant")
 
         last_user_message: Optional[str] = None
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    last_user_message = content[:300]
-                elif isinstance(content, list):
-                    parts = [i.get("text", "") for i in content if isinstance(i, dict) and i.get("type") == "text"]
-                    last_user_message = " ".join(parts)[:300]
-                break
+        prompts: list[dict[str, Any]] = []
+        for m in messages:
+            if m.get("role") != "user":
+                continue
+            content = m.get("content", "")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                parts = [i.get("text", "") for i in content if isinstance(i, dict) and i.get("type") == "text"]
+                text = " ".join(parts)
+            else:
+                text = ""
+            text = text.strip()
+            if not text:
+                continue
+            prompts.append({
+                "text": text,
+                "timestamp": m.get("timestamp") or m.get("createdAt") or "",
+            })
+            last_user_message = text[:300]
 
         lifetime_usage = normalize_usage(raw.get("usage") or raw.get("lifetime_usage") or {})
         token_deltas: list[TokenDelta] = []
@@ -400,6 +411,7 @@ class CodexSessionApp:
             "user_messages": user_messages,
             "agent_messages": agent_messages,
             "last_user_message": last_user_message,
+            "prompts": prompts,
             "lifetime_usage": lifetime_usage,
             "token_deltas": [
                 {

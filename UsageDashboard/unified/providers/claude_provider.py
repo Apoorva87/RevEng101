@@ -52,9 +52,13 @@ class ClaudeProvider(SessionProvider):
                     total_tokens=int(tokens.get("total_tokens") or 0),
                     input_tokens=int(tokens.get("read_tokens") or 0),
                     output_tokens=int(tokens.get("write_tokens") or 0),
+                    cache_read_tokens=int(tokens.get("cache_read_input_tokens") or 0),
+                    cache_creation_tokens=int(tokens.get("cache_creation_input_tokens") or 0),
                     user_messages=int(tokens.get("user_prompts") or 0),
                     assistant_messages=int(tokens.get("assistant_messages") or 0),
                     tool_uses=int(tokens.get("tool_uses") or 0),
+                    subagent_count=int(s.get("subagent_count") or 0),
+                    subagent_tokens=int(s.get("subagent_tokens") or 0),
                     last_prompt=s.get("last_prompt"),
                     last_error=s.get("last_error_text"),
                     resume_command=s.get("resume_command"),
@@ -64,6 +68,7 @@ class ClaudeProvider(SessionProvider):
                         "models": s.get("models"),
                         "file_mtime": s.get("file_mtime"),
                         "session_file": s.get("session_file"),
+                        "subagent_files": s.get("subagent_files") or [],
                     },
                 )
             )
@@ -72,6 +77,20 @@ class ClaudeProvider(SessionProvider):
     def raw_snapshot(self) -> dict[str, Any]:
         with self._lock:
             return self._analyzer.snapshot()
+
+    def session_prompts(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            snapshot = self._analyzer.snapshot()
+        session = next((s for s in snapshot.get("sessions", []) if s["session_id"] == session_id), None)
+        if not session:
+            return None
+        return {
+            "session_id": session_id,
+            "project": Path(session.get("project_path") or "").name,
+            "prompts": session.get("prompts") or [],
+            "subagent_count": session.get("subagent_count") or 0,
+            "subagent_tokens": session.get("subagent_tokens") or 0,
+        }
 
     def usage_snapshot(self) -> dict[str, Any]:
         with self._lock:

@@ -6,7 +6,7 @@ import json
 import shlex
 import threading
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -186,6 +186,10 @@ class SessionParseResult:
     tool_uses: int
     file_mtime: float | None
     session_file: str | None
+    prompts: list[dict[str, Any]] = field(default_factory=list)
+    subagent_count: int = 0
+    subagent_tokens: int = 0
+    subagent_files: list[str] = field(default_factory=list)
 
 
 class ClaudeSessionAnalyzer:
@@ -345,6 +349,7 @@ class ClaudeSessionAnalyzer:
         assistant_messages = 0
         tool_uses = 0
         working_path: str | None = None
+        prompts: list[dict[str, Any]] = []
 
         for entry in lines:
             entry_type = entry.get("type")
@@ -357,6 +362,8 @@ class ClaudeSessionAnalyzer:
             if entry_type == "user":
                 msg = entry.get("message") or {}
                 content = msg.get("content")
+                is_sidechain = entry.get("isSidechain", False)
+                user_type = entry.get("userType", "")
                 if is_tool_result_only(content):
                     tool_uses += 1
                 else:
@@ -364,6 +371,12 @@ class ClaudeSessionAnalyzer:
                     text = extract_user_text(content)
                     if text:
                         last_prompt = text[:300]
+                        if not is_sidechain and user_type != "tool":
+                            prompts.append({
+                                "text": text,
+                                "timestamp": entry.get("timestamp"),
+                                "entrypoint": entry.get("entrypoint", ""),
+                            })
                 err = extract_error_text(entry)
                 if err:
                     last_error = err
@@ -417,6 +430,17 @@ class ClaudeSessionAnalyzer:
         if first_ts and last_ts:
             duration = int(last_ts - first_ts)
 
+        subagent_count = 0
+        subagent_tokens = 0
+        subagent_files: list[str] = []
+        subagents_dir = path.parent / path.stem / "subagents"
+        if subagents_dir.is_dir():
+            for sub_file in subagents_dir.glob("*.jsonl"):
+                sub_totals = self._subagent_tokens(sub_file)
+                subagent_count += 1
+                subagent_tokens += sub_totals
+                subagent_files.append(str(sub_file))
+
         return SessionParseResult(
             session_id=session_id,
             project_path=project_path_str,
@@ -444,7 +468,30 @@ class ClaudeSessionAnalyzer:
             tool_uses=tool_uses,
             file_mtime=file_mtime,
             session_file=str(path),
+            prompts=prompts,
+            subagent_count=subagent_count,
+            subagent_tokens=subagent_tokens,
+            subagent_files=subagent_files,
         )
+
+    def _subagent_tokens(self, sub_path: Path) -> int:
+        """Parse a subagent session file and return its total token count."""
+        totals: dict[str, int] = {f: 0 for f in USAGE_FIELDS}
+        try:
+            for raw in sub_path.read_text(encoding="utf-8").splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("type") == "assistant":
+                    usage = (entry.get("message") or {}).get("usage") or {}
+                    merge_counter(totals, numeric_usage_totals(usage))
+        except OSError:
+            return 0
+        return totals.get("total_tokens", 0)
 
     def _session_result(self, path: Path) -> SessionParseResult:
         key = str(path)
@@ -525,6 +572,10 @@ class ClaudeSessionAnalyzer:
                     "tool_uses": result.tool_uses,
                     "file_mtime": result.file_mtime,
                     "session_file": result.session_file,
+                    "prompts": result.prompts,
+                    "subagent_count": result.subagent_count,
+                    "subagent_tokens": result.subagent_tokens,
+                    "subagent_files": result.subagent_files,
                 })
                 all_usage_events.extend(result.usage_events)
                 all_limit_events.extend(result.limit_events)

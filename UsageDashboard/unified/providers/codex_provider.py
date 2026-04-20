@@ -126,6 +126,20 @@ class CodexProvider(SessionProvider):
         with self._lock:
             return self._app.build_snapshot(preset="all")
 
+    def session_prompts(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            snapshot = self._app.build_snapshot(preset="all")
+        session = next((s for s in snapshot.get("sessions", []) if s["session_id"] == session_id), None)
+        if not session:
+            return None
+        return {
+            "session_id": session_id,
+            "project": session.get("project") or "",
+            "prompts": session.get("prompts") or [],
+            "subagent_count": 0,
+            "subagent_tokens": 0,
+        }
+
     def usage_snapshot(self) -> dict[str, Any]:
         with self._lock:
             return self._app.usage_snapshot()

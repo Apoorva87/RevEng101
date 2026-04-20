@@ -165,26 +165,104 @@ class SessionHub:
         return {"error": f"Session {session_id} not found in any provider"}
 
     def delete_inactive_sessions(self, inactivity_days: int = INACTIVITY_THRESHOLD_DAYS) -> dict[str, Any]:
-        """Delete all sessions inactive beyond threshold across all providers."""
+        """Delete every session whose last activity is older than the threshold.
+
+        Includes idle *and* blocked (rate_limited / error) sessions — anything
+        that isn't currently running. Sessions without a timestamp fall back to
+        the session file's mtime so genuinely orphaned files are not stuck.
+        """
         threshold = time.time() - inactivity_days * 86400
         data = self.scan_all()
-        deleted = []
-        errors = []
+        deleted: list[str] = []
+        skipped: list[dict[str, Any]] = []
+        errors: list[str] = []
         for s in data.get("sessions", []):
+            if s.get("state_category") == "running":
+                continue
             last_ts = s.get("last_activity_at") or 0
-            if last_ts > 0 and last_ts < threshold and s.get("state_category") == "idle":
-                result = self.delete_session(s["session_id"])
-                if "error" in result:
-                    errors.append(result["error"])
-                else:
-                    deleted.append(s["session_id"])
-        return {"deleted": len(deleted), "errors": errors}
+            if not last_ts:
+                last_ts = (s.get("extra") or {}).get("file_mtime") or 0
+            if not last_ts or last_ts >= threshold:
+                continue
+            result = self.delete_session(s["session_id"])
+            if "error" in result:
+                errors.append(f"{s['session_id']}: {result['error']}")
+                skipped.append({"session_id": s["session_id"], "error": result["error"]})
+            else:
+                deleted.append(s["session_id"])
+        return {
+            "deleted": len(deleted),
+            "deleted_ids": deleted,
+            "errors": errors,
+            "skipped": skipped,
+        }
+
+    def session_prompts(self, session_id: str) -> dict[str, Any] | None:
+        """Return all human prompts for a session, trying each provider."""
+        with self._lock:
+            for provider in self.providers:
+                getter = getattr(provider, "session_prompts", None)
+                if not callable(getter):
+                    continue
+                result = getter(session_id)
+                if result is not None:
+                    result["provider"] = provider.provider_id
+                    return result
+        return None
+
+    def project_aggregates(self) -> dict[str, Any]:
+        """Aggregate totals per project across providers (token_analysis-style)."""
+        data = self.scan_all()
+        projects: dict[str, dict[str, Any]] = {}
+        for s in data.get("sessions", []):
+            key = s.get("project_name") or "(unknown)"
+            bucket = projects.setdefault(key, {
+                "project": key,
+                "sessions": 0,
+                "total_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "subagent_count": 0,
+                "subagent_tokens": 0,
+                "providers": set(),
+                "last_activity_at": 0,
+            })
+            bucket["sessions"] += 1
+            bucket["total_tokens"] += int(s.get("total_tokens") or 0)
+            bucket["input_tokens"] += int(s.get("input_tokens") or 0)
+            bucket["output_tokens"] += int(s.get("output_tokens") or 0)
+            bucket["cache_read_tokens"] += int(s.get("cache_read_tokens") or 0)
+            bucket["cache_creation_tokens"] += int(s.get("cache_creation_tokens") or 0)
+            bucket["subagent_count"] += int(s.get("subagent_count") or 0)
+            bucket["subagent_tokens"] += int(s.get("subagent_tokens") or 0)
+            bucket["providers"].add(s.get("provider") or "")
+            la = s.get("last_activity_at") or 0
+            if la > bucket["last_activity_at"]:
+                bucket["last_activity_at"] = la
+
+        rows = []
+        for bucket in projects.values():
+            bucket["providers"] = sorted(p for p in bucket["providers"] if p)
+            rows.append(bucket)
+        rows.sort(key=lambda r: r["total_tokens"], reverse=True)
+        return {"projects": rows, "generated_at": time.time()}
 
 
 def _session_dict(s: NormalizedSession) -> dict[str, Any]:
     d = asdict(s)
     d["activity"] = classify_activity(s.last_activity_at)
     return d
+
+
+def _opt_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class UnifiedHandler(BaseHTTPRequestHandler):
@@ -257,14 +335,40 @@ class UnifiedHandler(BaseHTTPRequestHandler):
         if path == "/api/usage-breakdown":
             try:
                 params = parse_qs(parsed.query)
+                start_ts = _opt_float((params.get("start_ts") or [None])[0])
+                end_ts = _opt_float((params.get("end_ts") or [None])[0])
+                if start_ts is None or end_ts is None:
+                    self._send_json({"error": "start_ts and end_ts are required"}, 400)
+                    return
                 payload = self.server.hub.usage_breakdown(
                     provider_id=(params.get("provider") or ["all"])[0],
-                    start_ts=float((params.get("start_ts") or [None])[0]),
-                    end_ts=float((params.get("end_ts") or [None])[0]),
+                    start_ts=start_ts,
+                    end_ts=end_ts,
                 )
                 self._send_json(payload)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/projects":
+            try:
+                self._send_json(self.server.hub.project_aggregates())
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path.startswith("/api/sessions/") and path.endswith("/prompts"):
+            session_id = path[len("/api/sessions/"):-len("/prompts")]
+            if not session_id:
+                self._send_json({"error": "Missing session_id"}, 400)
+                return
+            result = self.server.hub.session_prompts(session_id)
+            if result is None:
+                self._send_json({"error": f"Session {session_id} not found"}, 404)
+            else:
+                self._send_json(result)
             return
 
         if path.startswith("/api/provider/"):
