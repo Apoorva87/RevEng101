@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OAuthModelRouter Trace</title>
+<link rel="stylesheet" href="/static/portal.css">
+<script src="https://cdn.jsdelivr.net/npm/json-formatter-js@2.5.23/dist/json-formatter.umd.js"></script>
+</head>
+<body class="trace-page-body">
+
+<div class="header">
+  <div class="header-brand">
+    <h1><span>OAuth</span>ModelRouter</h1>
+    <div class="header-subtitle">Dedicated trace viewer for request rewrites, payloads, and upstream responses.</div>
+  </div>
+  <div class="header-actions">
+    <a class="btn" href="/portal#logs">Back To Logs</a>
+    <a class="btn" href="/help">Help</a>
+  </div>
+</div>
+
+<div class="container trace-page-container">
+  <div class="trace-page-toolbar">
+    <div>
+      <h2 id="trace-page-title">Trace</h2>
+      <div class="trace-page-subtitle">Incoming request, outgoing request, and incoming response with collapsible structured payloads.</div>
+    </div>
+    <div class="trace-page-actions">
+      <button class="btn" id="trace-expand-all">Expand All</button>
+      <button class="btn" id="trace-collapse-all">Collapse All</button>
+      <button class="btn btn-primary" id="trace-copy-json">Copy JSON</button>
+    </div>
+  </div>
+
+  <div id="trace-page-root" class="trace-page-root">
+    <div class="empty-state">Loading trace...</div>
+  </div>
+</div>
+
+<script src="/static/trace_viewer.js"></script>
+<script src="/static/trace_detail.js"></script>
+</body>
+</html>

@@ -22,6 +22,8 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 DB_PATH = CONFIG_DIR / "tokens.db"
 LOG_DIR = CONFIG_DIR / "logs"
 
+OPENAI_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
 DEFAULT_PROVIDERS = {
     "claude": ProviderConfig(
         upstream="https://api.anthropic.com",
@@ -36,7 +38,7 @@ DEFAULT_PROVIDERS = {
         auth_header="Authorization",
         auth_prefix="Bearer",
         token_endpoint="https://auth.openai.com/oauth/token",
-        oauth_client_id=None,
+        oauth_client_id=OPENAI_CODEX_CLIENT_ID,
     ),
 }
 

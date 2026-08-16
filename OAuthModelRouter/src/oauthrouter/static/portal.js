@@ -772,6 +772,10 @@ function switchPage(page) {
   const idx = pages.indexOf(page);
   document.querySelectorAll('.page-tab')[idx].classList.add('active');
   document.getElementById(`page-${page}`).classList.add('active');
+  const desiredHash = page === 'logs' ? '#logs' : '#tokens';
+  if (window.location.hash !== desiredHash) {
+    history.replaceState(null, '', desiredHash);
+  }
 
   if (page === 'logs') {
     loadLogs();
@@ -785,6 +789,7 @@ function switchPage(page) {
 
 // ─── Logs ───────────────────────────────────────────────────
 let logInterval = null;
+let selectedLogId = null;
 
 async function loadLogs() {
   try {
@@ -809,14 +814,24 @@ function renderLogs(logs) {
   const body = document.getElementById('logs-body');
   if (!logs.length) {
     body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:40px">No requests logged yet. Send a request through the proxy to see it here.</td></tr>';
+    selectedLogId = null;
+    document.getElementById('log-detail').innerHTML =
+      '<div class="empty-state">Select a request row to preview rewritten headers. Use Details for full request, body, and response inspection.</div>';
     return;
   }
+
+  const stillPresent = logs.some(log => log.id === selectedLogId);
+  if (!stillPresent) {
+    selectedLogId = null;
+  }
+
   body.innerHTML = logs.map(l => {
     const statusClass = l.status < 300 ? 'status-2xx' : l.status < 500 ? 'status-4xx' : 'status-5xx';
     const ts = new Date(l.timestamp);
     const time = ts.toLocaleTimeString();
+    const detailHref = `/portal/logs/${encodeURIComponent(l.id)}`;
     return `
-      <tr>
+      <tr class="log-row${selectedLogId === l.id ? ' log-row-selected' : ''}" data-log-id="${esc(l.id)}" onclick="previewLogDetail('${esc(l.id)}')">
         <td style="color:var(--text2)">${time}</td>
         <td>${l.method}</td>
         <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${esc(l.path)}">${esc(l.path)}</td>
@@ -825,332 +840,29 @@ function renderLogs(logs) {
         <td><span class="${statusClass}">${l.status}</span></td>
         <td>${l.elapsed_ms}ms</td>
         <td style="color:var(--text2)">${esc(l.client)}</td>
-        <td><button class="btn btn-sm" onclick="loadLogDetail('${esc(l.id)}')">Details</button></td>
+        <td><a class="btn btn-sm" href="${detailHref}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Details</a></td>
       </tr>`;
   }).join('');
 }
 
-async function loadLogDetail(id) {
+function highlightSelectedLogRow() {
+  document.querySelectorAll('.log-row').forEach(row => {
+    row.classList.toggle('log-row-selected', row.dataset.logId === selectedLogId);
+  });
+}
+
+async function previewLogDetail(id) {
+  selectedLogId = id;
+  highlightSelectedLogRow();
   const panel = document.getElementById('log-detail');
-  panel.innerHTML = '<div class="empty-state">Loading request details...</div>';
+  panel.innerHTML = '<div class="empty-state">Loading rewrite preview...</div>';
   try {
     const detail = await api(`/api/logs/${encodeURIComponent(id)}`);
-    renderLogDetail(detail);
-  } catch (e) {
-    panel.innerHTML = '<div class="empty-state">Could not load request details.</div>';
-  }
-}
-
-function renderLogDetail(detail) {
-  const panel = document.getElementById('log-detail');
-  const incoming = detail.incoming || {};
-  const attempts = detail.attempts || [];
-  const final = detail.final || {};
-  const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null;
-  const provider = incoming.path ? incoming.path.split('/')[1] || '' : '';
-  const providerBadge = provider
-    ? `<span class="provider-icon ${provider}"></span><span class="badge badge-${provider}">${provider}</span>`
-    : '';
-  const tokenUsed = lastAttempt ? lastAttempt.token_id || 'unknown' : '—';
-  const finalStatus = Number(final.status);
-  const statusClass = Number.isFinite(finalStatus)
-    ? finalStatus < 300 ? 'status-2xx' : finalStatus < 500 ? 'status-4xx' : 'status-5xx'
-    : '';
-
-  const pendingTrees = [];
-
-  const renderSection = (title, contentHtml, { open = false, meta = [] } = {}) => {
-    const metaHtml = meta.length
-      ? `<span class="trace-meta">${esc(meta.join(' · '))}</span>`
-      : '';
-    return `
-      <details class="trace-block"${open ? ' open' : ''}>
-        <summary class="trace-title">
-          <span>${esc(title)}</span>
-          ${metaHtml}
-        </summary>
-        ${contentHtml}
-      </details>`;
-  };
-
-  const renderJsonSection = (
-    title,
-    value,
-    { open = false, meta = [], emptyLabel = '(none)', treatEmptyObjectAsEmpty = false } = {}
-  ) => {
-    const isEmptyObject = (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      !Object.keys(value).length
-    );
-    if (value === undefined || value === null || (treatEmptyObjectAsEmpty && isEmptyObject)) {
-      return renderSection(
-        title,
-        `<pre class="trace-pre trace-empty">${esc(emptyLabel)}</pre>`,
-        { open, meta }
-      );
-    }
-    const id = `json-tree-${pendingTrees.length}`;
-    pendingTrees.push({ id, value });
-    return renderSection(title, `<div class="json-tree" id="${id}"></div>`, { open, meta });
-  };
-
-  const renderTextSection = (title, text, { open = false, meta = [], emptyLabel = '(none)' } = {}) => {
-    const content = text && String(text).length ? String(text) : emptyLabel;
-    const emptyClass = content === emptyLabel ? ' trace-empty' : '';
-    return renderSection(
-      title,
-      `<pre class="trace-pre${emptyClass}">${esc(content)}</pre>`,
-      { open, meta }
-    );
-  };
-
-  const renderBodySection = (title, bodyInfo, headers, { open = true } = {}) => {
-    const body = bodyInfo || {};
-    const meta = bodyMetaParts(body, headers);
-    const structured = parseStructuredPayload(body, headers);
-    if (structured !== null) {
-      return renderJsonSection(title, structured, {
-        open,
-        meta,
-        emptyLabel: '(empty body)',
-      });
-    }
-    return renderTextSection(title, getBodyPreviewText(body), {
-      open,
-      meta,
-      emptyLabel: '(empty body)',
+    TraceViewer.renderPreview(panel, detail, {
+      detailsHref: `/portal/logs/${encodeURIComponent(id)}`,
     });
-  };
-
-  const renderStageCard = ({ kicker, title, meta = [], sections = [] }) => `
-    <section class="trace-stage">
-      <div class="trace-stage-head">
-        <div>
-          <div class="trace-stage-kicker">${esc(kicker)}</div>
-          <div class="trace-stage-title">${esc(title)}</div>
-        </div>
-        ${meta.length
-          ? `<div class="trace-stage-meta-list">${meta.map(item => `<span class="trace-pill">${esc(item)}</span>`).join('')}</div>`
-          : ''}
-      </div>
-      <div class="trace-stage-body">
-        ${sections.join('')}
-      </div>
-    </section>`;
-
-  const renderIncomingStage = () => renderStageCard({
-    kicker: 'Incoming Request',
-    title: formatHttpTarget(incoming),
-    meta: [countLabel('header', incoming.headers)],
-    sections: [
-      renderJsonSection('Headers', incoming.headers || {}, {
-        open: false,
-        meta: [countLabel('header', incoming.headers)],
-        emptyLabel: '(no headers)',
-        treatEmptyObjectAsEmpty: true,
-      }),
-      renderBodySection('Body', incoming.body, incoming.headers, {
-        open: hasVisibleBody(incoming.body),
-      }),
-    ],
-  });
-
-  const renderRequestStage = (request, tokenId) => renderStageCard({
-    kicker: 'Upstream Request',
-    title: formatHttpTarget(request),
-    meta: [
-      tokenId ? `token ${tokenId}` : null,
-      countLabel('header', request.headers),
-    ].filter(Boolean),
-    sections: [
-      renderJsonSection('Headers', request.headers || {}, {
-        open: false,
-        meta: [countLabel('header', request.headers)],
-        emptyLabel: '(no headers)',
-        treatEmptyObjectAsEmpty: true,
-      }),
-      renderBodySection('Body', request.body, request.headers, {
-        open: hasVisibleBody(request.body),
-      }),
-    ],
-  });
-
-  const renderResponseStage = response => renderStageCard({
-    kicker: 'Upstream Response',
-    title: `Status ${response.status ?? 'pending'}${response.streaming ? ' · streaming' : ''}`,
-    meta: [
-      countLabel('header', response.headers),
-      response.streaming ? 'stream' : null,
-    ].filter(Boolean),
-    sections: [
-      renderJsonSection('Headers', response.headers || {}, {
-        open: false,
-        meta: [countLabel('header', response.headers)],
-        emptyLabel: '(no headers)',
-        treatEmptyObjectAsEmpty: true,
-      }),
-      renderBodySection('Body', response.body, response.headers, {
-        open: hasVisibleBody(response.body),
-      }),
-    ],
-  });
-
-  const renderAttempt = (attempt, index) => {
-    const request = attempt.request || {};
-    const response = attempt.response || {};
-    return `
-      <section class="trace-attempt-shell">
-        <div class="trace-attempt-head">
-          <div class="trace-attempt-label">Attempt ${index + 1}</div>
-          <div class="trace-attempt-subtle">Token: ${esc(attempt.token_id || 'unknown')}</div>
-        </div>
-        <div class="trace-attempt-grid">
-          ${renderRequestStage(request, attempt.token_id || '')}
-          ${renderResponseStage(response)}
-        </div>
-      </section>`;
-  };
-
-  panel.innerHTML = `
-    <div class="detail-header">
-      <div>
-        <h3>
-          ${providerBadge}
-          <span class="${statusClass}" style="margin-left:8px;font-family:var(--font)">${final.status || 'pending'}</span>
-          <span style="color:var(--text2);font-weight:400"> · ${final.elapsed_ms ?? '—'}ms · token: <span style="color:var(--text)">${esc(tokenUsed)}</span> · ${attempts.length} attempt${attempts.length === 1 ? '' : 's'}</span>
-        </h3>
-        <div class="detail-warning">${esc(detail.warning || 'Trace may contain authorization headers.')}</div>
-      </div>
-      <button class="btn btn-sm" onclick="copyTrace('${esc(detail.id || '')}')">Copy JSON</button>
-    </div>
-    <div class="detail-grid">
-      ${renderIncomingStage()}
-      ${attempts.map((attempt, index) => renderAttempt(attempt, index)).join('')}
-    </div>`;
-
-  pendingTrees.forEach(({ id, value }) => mountJsonTree(id, value));
-  panel.dataset.trace = JSON.stringify(detail, null, 2);
-}
-
-function formatHttpTarget(req) {
-  if (!req || !Object.keys(req).length) return '(no request data)';
-  const method = req.method || '?';
-  const target = req.url || req.path || '';
-  return `${method} ${target}`.trim();
-}
-
-function mountJsonTree(elementId, value) {
-  const el = document.getElementById(elementId);
-  if (!el) return;
-  if (typeof JSONFormatter === 'undefined') {
-    const pre = document.createElement('pre');
-    pre.className = 'json-tree-fallback';
-    pre.textContent = JSON.stringify(value, null, 2);
-    el.appendChild(pre);
-    return;
-  }
-  const formatter = new JSONFormatter(value, 1, {
-    theme: 'dark',
-    hoverPreviewEnabled: true,
-    hoverPreviewArrayCount: 50,
-  });
-  el.appendChild(formatter.render());
-}
-
-function countLabel(noun, value) {
-  const count = Object.keys(value || {}).length;
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
-function hasVisibleBody(body) {
-  return Boolean(body && !body.is_empty && String(body.text || '').length);
-}
-
-function findHeaderValue(headers, name) {
-  const wanted = String(name || '').toLowerCase();
-  for (const [key, value] of Object.entries(headers || {})) {
-    if (key.toLowerCase() === wanted) return String(value || '');
-  }
-  return '';
-}
-
-function isJsonContentType(contentType) {
-  const normalized = String(contentType || '').toLowerCase();
-  return normalized.includes('/json') || normalized.includes('+json');
-}
-
-function parseStructuredPayload(body, headers = {}) {
-  if (!body || body.is_empty) return null;
-  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') return null;
-
-  let candidate = String(body.text || '').trim();
-  if (!candidate) return null;
-
-  for (let depth = 0; depth < 3; depth += 1) {
-    const parsed = tryParseJson(candidate);
-    if (parsed === null) return null;
-    if (parsed && typeof parsed === 'object') return parsed;
-    if (typeof parsed === 'string') {
-      const nested = parsed.trim();
-      if (!nested || nested === candidate) return null;
-      candidate = nested;
-      continue;
-    }
-    return isJsonContentType(findHeaderValue(headers, 'content-type')) ? parsed : null;
-  }
-
-  return null;
-}
-
-function getBodyPreviewText(body) {
-  if (!body || body.is_empty) return '';
-  const raw = String(body.text || '');
-  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') return raw;
-
-  let decoded = raw;
-  for (let depth = 0; depth < 2; depth += 1) {
-    const parsed = tryParseJson(decoded);
-    if (typeof parsed !== 'string') break;
-    decoded = parsed;
-  }
-  return decoded;
-}
-
-function bodyMetaParts(body, headers = {}) {
-  const meta = [];
-  const contentType = findHeaderValue(headers, 'content-type');
-  if (contentType) meta.push(contentType.split(';')[0]);
-  if (body.size_bytes) meta.push(`${body.size_bytes.toLocaleString()} bytes`);
-  if ((body.encoding || 'utf-8').toLowerCase() !== 'utf-8') meta.push(body.encoding);
-  if (body.text_truncated) {
-    const shownChars = String(body.text || '').length;
-    const totalChars = body.text_total_chars || shownChars;
-    meta.push(`truncated ${shownChars.toLocaleString()} / ${totalChars.toLocaleString()} chars`);
-  }
-  return meta;
-}
-
-function tryParseJson(text) {
-  const raw = String(text || '');
-  if (!raw.trim()) return null;
-  try {
-    return JSON.parse(raw);
   } catch (e) {
-    return null;
-  }
-}
-
-async function copyTrace(id) {
-  const panel = document.getElementById('log-detail');
-  const text = panel.dataset.trace || '';
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(`Copied trace ${id}`);
-  } catch (e) {
-    toast('Copy failed', 'error');
+    panel.innerHTML = '<div class="empty-state">Could not load request preview.</div>';
   }
 }
 
@@ -1180,7 +892,8 @@ async function clearLogsView() {
     document.getElementById('logs-body').innerHTML =
       '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:40px">Cleared. New requests will appear here.</td></tr>';
     document.getElementById('log-detail').innerHTML =
-      '<div class="empty-state">Select a request to inspect headers and payloads.</div>';
+      '<div class="empty-state">Select a request row to preview rewritten headers. Use Details for full request, body, and response inspection.</div>';
+    selectedLogId = null;
     toast(`Cleared ${result.cleared ?? 0} request traces`);
     refreshLogDirHint();
   } catch (e) {}
@@ -1257,8 +970,13 @@ async function saveEditToken() {
 
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  loadTokens();
   startDashboardPolling();
+  if (window.location.hash === '#logs') {
+    switchPage('logs');
+  } else {
+    loadTokens();
+    setEndpointPorts();
+  }
 });
 
 // Close modal on overlay click

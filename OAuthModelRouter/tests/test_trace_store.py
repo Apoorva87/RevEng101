@@ -12,6 +12,7 @@ async def test_trace_store_persists_and_reloads(tmp_path):
     trace_root = tmp_path / "logs"
     trace_store = TraceStore(trace_root, max_entries=10)
     await trace_store.init()
+    body_text = "x" * 40_000
 
     log_entry = {
         "id": "req-123",
@@ -28,7 +29,10 @@ async def test_trace_store_persists_and_reloads(tmp_path):
     }
     trace = {
         "id": "req-123",
-        "incoming": {"method": "POST"},
+        "incoming": {
+            "method": "POST",
+            "body": {"text": body_text, "encoding": "utf-8"},
+        },
         "attempts": [
             {
                 "token_id": "claude-a",

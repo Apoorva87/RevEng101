@@ -22,7 +22,7 @@ class TraceStore:
         *,
         max_entries: int = 200,
         max_disk_entries: int = 1000,
-        max_body_chars: int = 32_000,
+        max_body_chars: Optional[int] = None,
     ) -> None:
         self._root = Path(root)
         self._detail_dir = self._root / "requests"
@@ -183,6 +183,9 @@ class TraceStore:
                 path.unlink(missing_ok=True)
 
     def _sanitize_trace_for_disk(self, trace: dict[str, Any]) -> dict[str, Any]:
+        if self._max_body_chars is None or self._max_body_chars <= 0:
+            return trace
+
         sanitized = copy.deepcopy(trace)
         incoming = sanitized.get("incoming")
         if isinstance(incoming, dict):
@@ -203,6 +206,8 @@ class TraceStore:
 
     def _trim_body(self, body: Any) -> None:
         if not isinstance(body, dict):
+            return
+        if self._max_body_chars is None or self._max_body_chars <= 0:
             return
         text = body.get("text")
         if not isinstance(text, str):

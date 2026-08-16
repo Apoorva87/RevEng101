@@ -381,7 +381,8 @@
             </p>
             <ul>
               <li><span class="mono">loadLogs()</span> → <span class="mono">GET /api/logs</span></li>
-              <li><span class="mono">loadLogDetail(id)</span> → <span class="mono">GET /api/logs/{id}</span></li>
+              <li>Clicking a log row previews the incoming-vs-outgoing request rewrite, and <span class="mono">Details</span> opens the dedicated trace page</li>
+              <li>The dedicated trace page fetches <span class="mono">GET /api/logs/{id}</span> for full incoming request, outgoing request, and incoming response inspection</li>
               <li>The auto-refresh loop polls every 3 seconds while the Logs tab is active</li>
             </ul>
           </div>
@@ -404,7 +405,15 @@
           </div>
           <div class="path-item">
             <strong><span class="mono">src/oauthrouter/static/portal.js</span></strong>
-            <p>Dashboard client controller, rendering, polling, and action handlers.</p>
+            <p>Dashboard client controller, rendering, polling, action handlers, and the logs-page preview flow.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/static/trace_viewer.js</span></strong>
+            <p>Shared request-trace rendering used by both the logs preview and the dedicated trace detail page.</p>
+          </div>
+          <div class="path-item">
+            <strong><span class="mono">src/oauthrouter/static/trace_detail.html</span></strong>
+            <p>Standalone page for full trace inspection with expand/collapse controls.</p>
           </div>
           <div class="path-item">
             <strong><span class="mono">src/oauthrouter/routes/*.py</span></strong>

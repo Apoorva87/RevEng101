@@ -258,6 +258,17 @@ def test_help_route_exists():
     )
 
 
+def test_trace_detail_route_exists():
+    """The dedicated trace detail page is exposed as /portal/logs/{log_id}."""
+    from oauthrouter.server import app
+
+    assert any(
+        route.path == "/portal/logs/{log_id}"
+        for route in app.routes
+        if hasattr(route, "path")
+    )
+
+
 def test_discovery_routes_removed():
     """Legacy discovery/import routes are no longer registered."""
     from oauthrouter.server import app

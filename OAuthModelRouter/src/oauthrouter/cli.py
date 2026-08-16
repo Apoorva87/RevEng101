@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -20,6 +21,7 @@ token_app = typer.Typer(help="Manage OAuth tokens.")
 app.add_typer(token_app, name="token")
 
 logger = logging.getLogger(__name__)
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _configure_logging(verbose: bool = False) -> None:
@@ -52,6 +54,11 @@ def _run_async(coro):
 def serve(
     host: Optional[str] = typer.Option(None, help="Bind host (overrides config)"),
     port: Optional[int] = typer.Option(None, help="Bind port (overrides config)"),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Enable code reloading for development.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """Start the OAuthModelRouter proxy server."""
@@ -68,6 +75,8 @@ def serve(
         "oauthrouter.server:app",
         host=bind_host,
         port=bind_port,
+        reload=reload,
+        reload_dirs=[str(SOURCE_ROOT)] if reload else None,
         log_level="debug" if verbose else "info",
     )
 

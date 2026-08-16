@@ -284,10 +284,10 @@ print(prof.get('email','unknown'), auth.get('chatgpt_plan_type','?'), auth.get('
     local count
     count=$(sqlite3 "$DB" "SELECT count(*) FROM tokens WHERE id='$token_id';")
     if [[ "$count" != "0" ]]; then
-      sqlite3 "$DB" "UPDATE tokens SET access_token='$access_token', refresh_token='$refresh_token', status='healthy', account_id='$acct_id' WHERE id='$token_id';"
+      sqlite3 "$DB" "UPDATE tokens SET access_token='$access_token', refresh_token='$refresh_token', token_endpoint='$OPENAI_TOKEN_URL', oauth_client_id='$OPENAI_CLIENT_ID', scopes='$OPENAI_SCOPES', status='healthy', account_id='$acct_id' WHERE id='$token_id';"
       echo "  Updated existing entry."
     else
-      sqlite3 "$DB" "INSERT INTO tokens (id, provider, access_token, refresh_token, status, account_id) VALUES ('$token_id', 'openai', '$access_token', '$refresh_token', 'healthy', '$acct_id');"
+      sqlite3 "$DB" "INSERT INTO tokens (id, provider, access_token, refresh_token, token_endpoint, oauth_client_id, scopes, status, account_id) VALUES ('$token_id', 'openai', '$access_token', '$refresh_token', '$OPENAI_TOKEN_URL', '$OPENAI_CLIENT_ID', '$OPENAI_SCOPES', 'healthy', '$acct_id');"
       echo "  Created new entry."
     fi
   else

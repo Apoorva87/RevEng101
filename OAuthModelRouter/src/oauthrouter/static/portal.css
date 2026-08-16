@@ -592,7 +592,9 @@
     padding: 6px 12px; font-size: 12px; font-family: var(--font);
     border-bottom: 1px solid var(--border); white-space: nowrap;
   }
+  .log-row { cursor: pointer; }
   .log-table tr:hover { background: var(--surface2); }
+  .log-row.log-row-selected { background: rgba(103, 181, 255, 0.10); }
   .log-scroll { max-height: 500px; overflow-y: auto; }
   .log-detail {
     border-top: 1px solid var(--border);
@@ -617,6 +619,11 @@
     flex-direction: column;
     gap: 16px;
     padding: 16px;
+  }
+  .log-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
   }
   .trace-stage {
     border: 1px solid var(--border);
@@ -755,7 +762,99 @@
   .trace-pre.trace-empty {
     opacity: 0.75;
   }
+  .trace-empty-note {
+    padding: 14px;
+    color: var(--text2);
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .trace-diff-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .trace-diff-row {
+    display: grid;
+    grid-template-columns: 140px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+  .trace-diff-key {
+    color: var(--text2);
+    font-family: var(--font);
+    font-size: 11px;
+    word-break: break-word;
+  }
+  .trace-diff-value {
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .trace-diff-empty {
+    opacity: 0.55;
+  }
+  .trace-diff-empty-mark {
+    color: var(--text2);
+  }
+  .trace-page-body {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top right, rgba(103,181,255,0.14), transparent 28%),
+      var(--bg);
+  }
+  .trace-page-container {
+    padding-top: 28px;
+    padding-bottom: 40px;
+  }
+  .trace-page-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .trace-page-toolbar h2 {
+    font-size: 20px;
+  }
+  .trace-page-subtitle {
+    margin-top: 6px;
+    color: var(--text2);
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 720px;
+  }
+  .trace-page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .trace-page-root {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: rgba(9, 16, 29, 0.82);
+    overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.24);
+  }
+  .trace-page-id {
+    color: var(--text2);
+    font-size: 11px;
+  }
   @media (max-width: 860px) {
+    .log-preview-grid {
+      grid-template-columns: 1fr;
+    }
+    .trace-diff-row {
+      grid-template-columns: 1fr;
+    }
     .trace-stage-head,
     .trace-attempt-head {
       flex-direction: column;
@@ -766,6 +865,13 @@
     }
     .trace-attempt-grid {
       grid-template-columns: 1fr;
+    }
+    .trace-page-toolbar {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .trace-page-actions {
+      justify-content: flex-start;
     }
   }
 

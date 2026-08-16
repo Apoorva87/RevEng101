@@ -102,18 +102,22 @@ What `scripts/dev/run.sh` does:
 - kills anything already listening on port `8100`
 - starts a fresh router from this checkout
 - writes process logs to `/tmp/oauthrouter-8100.log`
+- enables source reload by default for local development
 
 Useful environment overrides:
 
 ```bash
 PORT=8200 ./scripts/dev/run.sh
 LOG_FILE=/tmp/my-router.log ./scripts/dev/run.sh
+RELOAD=0 ./scripts/dev/run.sh
 ```
 
 You can also run it directly:
 
 ```bash
 PYTHONPATH=src python3 -m oauthrouter.cli serve --port 8100
+# Add --reload while developing:
+PYTHONPATH=src python3 -m oauthrouter.cli serve --port 8100 --reload
 ```
 
 Portal:
@@ -151,7 +155,7 @@ These logs show things like:
 
 ### Request Trace API
 
-The portal also exposes in-memory request traces:
+The portal also exposes request traces:
 
 - summary list: `GET /api/logs`
 - full detail: `GET /api/logs/{id}`
@@ -172,11 +176,23 @@ What this includes:
 - captured request/response headers
 - bodies when available
 
+In the Logs tab, selecting a row shows a compact incoming-versus-outgoing
+rewrite preview. Use **Details** to open a dedicated trace page containing the
+full incoming request, each upstream attempt, and the corresponding response.
+The detail page URL is:
+
+```text
+http://127.0.0.1:8100/portal/logs/<log_id>
+```
+
 Important:
 
-- this trace data is in memory only
-- it is capped to the latest 200 entries
-- it may contain live auth headers
+- the portal keeps the latest 200 summaries in memory and persists up to 1,000
+  recent trace details under `~/.oauthrouter/logs/`
+- request and response bodies are retained in full by default so the detail
+  page can inspect complete payloads
+- trace data can contain live auth headers and sensitive request or response
+  content; protect the local machine and clear traces when they are no longer needed
 
 ## Setting Up Tokens
 
@@ -250,6 +266,8 @@ oauthrouter token add \
 Repo helpers:
 
 - [scripts/dev/run.sh](scripts/dev/run.sh): restart the router
+- [scripts/auth/setup.sh](scripts/auth/setup.sh): import OpenAI/Codex OAuth
+  credentials and their refresh metadata into the router DB
 - [scripts/ops/db_tokens.sh](scripts/ops/db_tokens.sh): inspect or edit token rows
 - [index.html](index.html): local docs portal for Markdown and HTML notes
 
@@ -466,7 +484,10 @@ src/oauthrouter/
   server.py
   token_manager.py
   token_store.py
+  trace_store.py
   static/portal.html
+  static/trace_detail.html
+  static/trace_viewer.js
 ```
 
 ## Summary

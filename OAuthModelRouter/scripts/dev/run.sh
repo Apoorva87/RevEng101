@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PORT="${PORT:-8100}"
 LOG_FILE="${LOG_FILE:-/tmp/oauthrouter-${PORT}.log}"
+RELOAD="${RELOAD:-1}"
 
 existing_pid="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
 if [[ -n "$existing_pid" ]]; then
@@ -20,9 +21,18 @@ fi
 
 echo "Starting OAuthModelRouter on port $PORT..."
 cd "$ROOT_DIR"
-nohup env PYTHONPATH=src python3 -m oauthrouter.cli serve --port "$PORT" >"$LOG_FILE" 2>&1 &
+cmd=(env PYTHONPATH=src python3 -m oauthrouter.cli serve --port "$PORT")
+if [[ "$RELOAD" == "1" ]]; then
+  cmd+=(--reload)
+fi
+nohup "${cmd[@]}" >"$LOG_FILE" 2>&1 &
 new_pid="$!"
 
 echo "Started pid $new_pid"
 echo "Portal: http://127.0.0.1:${PORT}/portal"
 echo "Log: $LOG_FILE"
+if [[ "$RELOAD" == "1" ]]; then
+  echo "Reload: enabled"
+else
+  echo "Reload: disabled"
+fi

@@ -23,6 +23,12 @@ async def portal_page() -> HTMLResponse:
     return _static_html_response("portal.html")
 
 
+@router.get("/portal/logs/{log_id}", response_class=HTMLResponse)
+async def trace_detail_page(log_id: str) -> HTMLResponse:
+    """Serve the dedicated trace detail page."""
+    return _static_html_response("trace_detail.html")
+
+
 @router.get("/help", response_class=HTMLResponse)
 async def help_page() -> HTMLResponse:
     """Serve the built-in dashboard and endpoint walkthrough."""
